@@ -5,7 +5,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import type { Dict, Lang } from '@/lib/i18n';
 
-const NAV = ['/features', '/compare', '/docs', '/blog', '/news'];
+const NAV = ['/features', '/models', '/compare', '/docs', '/blog', '/news'];
 
 const GH = 'https://github.com/OtterMind/Nubase';
 

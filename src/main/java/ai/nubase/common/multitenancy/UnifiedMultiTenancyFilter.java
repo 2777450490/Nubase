@@ -101,6 +101,9 @@ public class UnifiedMultiTenancyFilter extends OncePerRequestFilter {
 //            "/mcp",
             "/storage/v1/health"    // Storage health check, no authentication required
     );
+    private static final Set<String> EXACT_NON_FILTERED_PATHS = Set.of(
+            "/api/v1/models/public"
+    );
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -120,6 +123,10 @@ public class UnifiedMultiTenancyFilter extends OncePerRequestFilter {
 
         // Skip paths that should not be filtered
         if (PlatformAdminPaths.skipsTenantMultitenancy(requestPath)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        if (EXACT_NON_FILTERED_PATHS.contains(requestPath)) {
             filterChain.doFilter(request, response);
             return;
         }

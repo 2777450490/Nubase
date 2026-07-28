@@ -54,6 +54,20 @@ public class PlatformUpstreamRepository {
                 mapper);
     }
 
+    /**
+     * Reads only non-secret fields required by the public model catalog.
+     *
+     * <p>This intentionally avoids selecting or decrypting upstream credentials.</p>
+     */
+    public List<CatalogModelSource> findAllActiveCatalogModels() {
+        return metadataJdbcTemplate.query(
+                "SELECT provider, supported_models FROM public.ai_gateway_platform_upstreams "
+                        + "WHERE is_active = TRUE ORDER BY priority ASC, id ASC",
+                (rs, rowNum) -> new CatalogModelSource(
+                        ApiProvider.fromString(rs.getString("provider")),
+                        fromJson(rs.getString("supported_models"))));
+    }
+
     public List<PlatformUpstream> findAll() {
         return metadataJdbcTemplate.query(
                 "SELECT " + COLUMNS + " FROM public.ai_gateway_platform_upstreams "
@@ -193,5 +207,14 @@ public class PlatformUpstreamRepository {
 
     private static int intOr(Integer v, int dflt) {
         return v == null ? dflt : v;
+    }
+
+    public record CatalogModelSource(
+            ApiProvider provider,
+            List<String> supportedModels
+    ) {
+        public CatalogModelSource {
+            supportedModels = supportedModels == null ? List.of() : List.copyOf(supportedModels);
+        }
     }
 }

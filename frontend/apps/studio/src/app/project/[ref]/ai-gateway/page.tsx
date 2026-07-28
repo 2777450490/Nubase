@@ -5,6 +5,7 @@ import {
   Activity,
   Bot,
   Copy,
+  ExternalLink,
   KeyRound,
   Plus,
   RefreshCw,
@@ -139,6 +140,9 @@ const TABS: { value: Tab; icon: LucideIcon; label: string }[] = [
   { value: 'pricing', icon: WalletCards, label: 'Cost estimates' },
 ];
 
+const PUBLIC_MODELS_URL = process.env.NEXT_PUBLIC_NUBASE_WEBSITE_URL
+  ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3001/models' : '/models');
+
 export default function AiGatewayPage({ params }: { params: { ref: string } }) {
   const { project } = useSession();
   const projectRef = useProjectRef(params.ref);
@@ -207,6 +211,15 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <a
+              href={PUBLIC_MODELS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              Supported models
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
             <code className="hidden rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground md:block">
               {API_BASE}/v1
             </code>

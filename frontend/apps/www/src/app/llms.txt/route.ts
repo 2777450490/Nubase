@@ -37,6 +37,7 @@ export function GET() {
 ## Get started
 
 - Homepage: ${SITE_URL}
+- Model catalog: ${SITE_URL}/models
 - Quickstart: ${SITE_URL}/docs/getting-started
 - GitHub: https://github.com/OtterMind/Nubase
 - npm (MCP bridge): https://www.npmjs.com/package/nubase_cli

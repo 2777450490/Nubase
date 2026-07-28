@@ -48,6 +48,8 @@ public class SecurityConfig {
                                 "/auth/v1/sso/**",
                                 "/auth/v1/health"
                         ).permitAll()
+                        // Public AI Gateway model catalog used by the marketing website.
+                        .requestMatchers("/api/v1/models/public").permitAll()
                         // Admin endpoints (access control enforced by the @RequireServiceRole AOP)
                         .requestMatchers("/auth/v1/admin/**", "/auth/v1/invite").permitAll()
                         // Platform developer account endpoints (Studio login); authenticated by PlatformAuthService itself

@@ -100,7 +100,7 @@ const en: Dict = {
     primary: 'Get started free',
     secondary: 'Star on GitHub',
   },
-  nav: { items: ['Features', 'Compare', 'Docs', 'Blog', 'News'], star: 'Star' },
+  nav: { items: ['Features', 'Models', 'Compare', 'Docs', 'Blog', 'News'], star: 'Star' },
   footer: {
     tagline: 'Turn AI-written code into real apps — your coding agent ships the frontend, backend and cron online. Self-host the whole stack in one Docker image.',
     cols: [
@@ -182,7 +182,7 @@ const zh: Dict = {
     primary: '免费开始',
     secondary: 'GitHub 加星',
   },
-  nav: { items: ['功能', '对比', '文档', '博客', '动态'], star: 'Star' },
+  nav: { items: ['功能', '模型', '对比', '文档', '博客', '动态'], star: 'Star' },
   footer: {
     tagline: '让 AI 写的代码变成真正的应用 —— 编码 Agent 把前端、后端与定时任务一并发布上线。用一个 Docker 镜像自托管整套栈。',
     cols: [
@@ -264,7 +264,7 @@ const ja: Dict = {
     primary: '無料で始める',
     secondary: 'GitHub でスター',
   },
-  nav: { items: ['機能', '比較', 'ドキュメント', 'ブログ', 'ニュース'], star: 'Star' },
+  nav: { items: ['機能', 'モデル', '比較', 'ドキュメント', 'ブログ', 'ニュース'], star: 'Star' },
   footer: {
     tagline: 'AI が書いたコードを本物のアプリに —— エージェントがフロント・バック・cron をまとめて公開。1 つの Docker イメージでスタック全体をセルフホスト。',
     cols: [
@@ -346,7 +346,7 @@ const fr: Dict = {
     primary: 'Commencer gratuitement',
     secondary: 'Star sur GitHub',
   },
-  nav: { items: ['Fonctionnalités', 'Comparer', 'Docs', 'Blog', 'Actus'], star: 'Star' },
+  nav: { items: ['Fonctionnalités', 'Modèles', 'Comparer', 'Docs', 'Blog', 'Actus'], star: 'Star' },
   footer: {
     tagline: 'Transformez le code de l’IA en vraies applis — votre agent met le frontend, le backend et cron en ligne. Auto-hébergez toute la stack dans une image Docker.',
     cols: [

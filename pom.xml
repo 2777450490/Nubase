@@ -328,6 +328,16 @@
         <profile>
             <id>with-frontend</id>
             <build>
+                <!-- Production artifacts must never include the gitignored local dev config,
+                     which may contain developer-machine credentials and overrides. -->
+                <resources>
+                    <resource>
+                        <directory>src/main/resources</directory>
+                        <excludes>
+                            <exclude>application-dev.yml</exclude>
+                        </excludes>
+                    </resource>
+                </resources>
                 <plugins>
                     <!-- Self-install Node + pnpm (into frontend/.maven-frontend) and build the
                          Studio static export. No reliance on a system Node/pnpm on PATH. -->

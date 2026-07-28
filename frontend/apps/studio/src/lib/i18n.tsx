@@ -87,6 +87,7 @@ const messages = {
     'user.menu': 'Account menu',
     'user.signedIn': 'Signed in',
     'user.platformUsers': 'Platform users',
+    'user.billingPrices': 'Customer billing prices',
     'user.platformSettings': 'Platform settings',
     'user.signOut': 'Sign out',
 
@@ -243,6 +244,7 @@ const messages = {
     'user.menu': '账号菜单',
     'user.signedIn': '已登录',
     'user.platformUsers': '平台用户',
+    'user.billingPrices': '客户计费价格',
     'user.platformSettings': '平台设置',
     'user.signOut': '退出登录',
 

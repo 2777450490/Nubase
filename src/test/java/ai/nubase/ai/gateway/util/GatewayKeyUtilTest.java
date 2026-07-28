@@ -1,6 +1,10 @@
 package ai.nubase.ai.gateway.util;
 
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -31,6 +35,17 @@ class GatewayKeyUtilTest {
     }
 
     @Test
+    void serviceRoleJwtIsAcceptedAsGatewayCredential() {
+        String key = serviceRoleKey("project_one", "service_role");
+
+        assertEquals("project_one", GatewayKeyUtil.parseServiceRoleAppCode(key));
+        assertTrue(GatewayKeyUtil.isGatewayCredential(key));
+        assertNull(GatewayKeyUtil.parseServiceRoleAppCode(serviceRoleKey("project_one", "authenticated")));
+        assertNull(GatewayKeyUtil.parseServiceRoleAppCode("header.payload.signature"));
+        assertFalse(GatewayKeyUtil.isGatewayCredential("project_one"));
+    }
+
+    @Test
     void sha256HexIsStableAnd64Chars() {
         String a = GatewayKeyUtil.sha256Hex("nbk_app_secret");
         String b = GatewayKeyUtil.sha256Hex("nbk_app_secret");
@@ -43,5 +58,14 @@ class GatewayKeyUtilTest {
     void displayPrefixIsTruncated() {
         String key = GatewayKeyUtil.generate("appABC", 48);
         assertEquals(20, GatewayKeyUtil.displayPrefix(key).length());
+    }
+
+    private String serviceRoleKey(String appCode, String role) {
+        return Jwts.builder()
+                .claim("ref", appCode)
+                .claim("role", role)
+                .signWith(Keys.hmacShaKeyFor(
+                        "01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8)))
+                .compact();
     }
 }

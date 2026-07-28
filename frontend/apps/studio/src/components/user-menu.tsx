@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LogOut, User, FolderGit2, ShieldCheck, Settings } from 'lucide-react';
+import { LogOut, User, FolderGit2, ShieldCheck, Settings, WalletCards } from 'lucide-react';
 import { cn } from '@nubase/ui';
 import { useSession, isSuperAdmin } from '@/lib/session';
 import { LanguageToggle, useI18n } from '@/lib/i18n';
@@ -79,6 +79,9 @@ export function UserMenu({ className }: { className?: string }) {
             <>
               <MenuLink href="/admin/users" icon={ShieldCheck} onClick={() => setOpen(false)}>
                 {tr('user.platformUsers')}
+              </MenuLink>
+              <MenuLink href="/admin/ai-gateway/pricing" icon={WalletCards} onClick={() => setOpen(false)}>
+                {tr('user.billingPrices')}
               </MenuLink>
               <MenuLink href="/admin/settings" icon={Settings} onClick={() => setOpen(false)}>
                 {tr('user.platformSettings')}

@@ -1,5 +1,6 @@
 package ai.nubase.ai.gateway.service;
 
+import ai.nubase.ai.gateway.billing.GatewayRequestContext;
 import ai.nubase.ai.gateway.dto.ApiUsageRecord;
 import ai.nubase.ai.gateway.dto.TokenUsage;
 import ai.nubase.ai.gateway.entity.UpstreamConfig;
@@ -16,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
-import okhttp3.sse.EventSources;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -42,16 +42,20 @@ public class OpenAINativeApiService {
     private static final String RESPONSES_PATH = "/v1/responses";
     private static final String RESPONSES_COMPACT_PATH = "/v1/responses/compact";
     private static final String MEMORIES_TRACE_SUMMARIZE_PATH = "/v1/memories/trace_summarize";
+    private static final String IMAGE_GENERATIONS_PATH = "/v1/images/generations";
     /** Compact / 摘要类: 上游可能要 90~180s, 默认 60s 不够; 用 per-call callTimeout 单独放宽 */
     private static final long SLOW_CALL_TIMEOUT_MS = 300_000L;
     private static final NativeOpenAIRoute DEFAULT_ROUTE =
             NativeOpenAIRoute.defaultProvider(DEFAULT_PROVIDER);
     private static final NativeOpenAIRoute RESPONSES_ROUTE =
-            NativeOpenAIRoute.responsesChannel(DEFAULT_CHANNEL_CODE, RESPONSES_PATH, 0L);
+            NativeOpenAIRoute.responsesChannel(DEFAULT_PROVIDER, DEFAULT_CHANNEL_CODE, RESPONSES_PATH, 0L);
     private static final NativeOpenAIRoute RESPONSES_COMPACT_ROUTE =
-            NativeOpenAIRoute.responsesChannel(DEFAULT_CHANNEL_CODE, RESPONSES_COMPACT_PATH, SLOW_CALL_TIMEOUT_MS);
+            NativeOpenAIRoute.responsesChannel(
+                    DEFAULT_PROVIDER, DEFAULT_CHANNEL_CODE, RESPONSES_COMPACT_PATH, SLOW_CALL_TIMEOUT_MS);
     private static final NativeOpenAIRoute MEMORIES_TRACE_SUMMARIZE_ROUTE =
-            NativeOpenAIRoute.responsesChannel(DEFAULT_CHANNEL_CODE, MEMORIES_TRACE_SUMMARIZE_PATH, SLOW_CALL_TIMEOUT_MS);
+            NativeOpenAIRoute.responsesChannel(
+                    DEFAULT_PROVIDER, DEFAULT_CHANNEL_CODE, MEMORIES_TRACE_SUMMARIZE_PATH, SLOW_CALL_TIMEOUT_MS);
+    private static final long IMAGE_CALL_TIMEOUT_MS = 300_000L;
 
     private final OpenAIConfig openAIConfig;
     private final ObjectMapper objectMapper;
@@ -59,6 +63,7 @@ public class OpenAINativeApiService {
     private final ApiRequestLogService requestLogService;
     private final UpstreamConfigService upstreamConfigService;
     private final PlatformUpstreamService platformUpstreamService;
+    private final AiGatewayStreamingHttpClientProvider streamingHttpClientProvider;
 
     private OkHttpClient httpClient;
 
@@ -94,6 +99,13 @@ public class OpenAINativeApiService {
             if (route.usesChannelCode()) {
                 try {
                     validateChannel(config, route);
+                } catch (IllegalArgumentException e) {
+                    throw new IOException(e.getMessage(), e);
+                }
+            }
+            if (route.provider() != null) {
+                try {
+                    validateProvider(config, route);
                 } catch (IllegalArgumentException e) {
                     throw new IOException(e.getMessage(), e);
                 }
@@ -147,6 +159,10 @@ public class OpenAINativeApiService {
 
     private UpstreamConfig getDefaultUpstream(NativeOpenAIRoute route) {
         String selectionModel = routeModelForSelection(route.supportedModel(), route);
+        if (route.usesChannelCode() && route.provider() != null) {
+            return upstreamConfigService.selectForProviderChannelAndModel(
+                    route.provider(), route.channelCode(), selectionModel);
+        }
         if (route.usesChannelCode()) {
             return upstreamConfigService.selectForChannelAndModel(route.channelCode(), selectionModel);
         }
@@ -161,6 +177,10 @@ public class OpenAINativeApiService {
 
     private List<UpstreamConfig> getFailoverUpstreams(NativeOpenAIRoute route, List<String> triedUpstreams) {
         String selectionModel = routeModelForSelection(route.supportedModel(), route);
+        if (route.usesChannelCode() && route.provider() != null) {
+            return upstreamConfigService.getFailoverUpstreamsByProviderChannelAndModel(
+                    route.provider(), route.channelCode(), selectionModel, triedUpstreams);
+        }
         if (route.usesChannelCode()) {
             return upstreamConfigService.getFailoverUpstreamsByChannelAndModel(
                     route.channelCode(), selectionModel, triedUpstreams);
@@ -228,6 +248,13 @@ public class OpenAINativeApiService {
         }
     }
 
+    private void validateProvider(UpstreamConfig config, NativeOpenAIRoute route) {
+        if (route.provider() != config.getProvider()) {
+            throw new IllegalArgumentException("upstream provider mismatch: upstream=" + config.getName()
+                    + ", expected=" + route.provider() + ", actual=" + config.getProvider());
+        }
+    }
+
     private String resolveChannelCode(UpstreamConfig config) {
         String channelCode = config.getChannelCode();
         if (channelCode != null && !channelCode.isBlank()) {
@@ -264,8 +291,9 @@ public class OpenAINativeApiService {
 
         String channelCode = normalizedModel.substring(0, separatorIndex);
         try {
-            if (upstreamConfigService.hasActiveUpstreamForChannelCode(channelCode)) {
-                return NativeOpenAIRoute.chatPrefix(channelCode + "/", channelCode, normalizedModel);
+            if (upstreamConfigService.hasActiveUpstreamForProviderAndChannel(DEFAULT_PROVIDER, channelCode)) {
+                return NativeOpenAIRoute.chatPrefix(
+                        channelCode + "/", channelCode, normalizedModel, DEFAULT_PROVIDER);
             }
         } catch (Exception e) {
             log.warn("Unable to resolve channel route from model prefix '{}', falling back: {}",
@@ -355,16 +383,35 @@ public class OpenAINativeApiService {
             return new NativeOpenAIRoute("", null, null, provider, null, true, false, 0L);
         }
 
-        private static NativeOpenAIRoute responsesChannel(String channelCode, String endpointPath, long callTimeoutMs) {
-            return new NativeOpenAIRoute("", null, channelCode, null, endpointPath, false, false, callTimeoutMs);
+        private static NativeOpenAIRoute responsesChannel(
+                ApiProvider provider, String channelCode, String endpointPath, long callTimeoutMs) {
+            return new NativeOpenAIRoute("", null, channelCode, provider, endpointPath, false, false, callTimeoutMs);
         }
 
-        private static NativeOpenAIRoute chatPrefix(String modelPrefix, String channelCode, String supportedModel) {
-            return new NativeOpenAIRoute(modelPrefix, supportedModel, channelCode, null, null, true, true, 0L);
+        private static NativeOpenAIRoute chatPrefix(
+                String modelPrefix, String channelCode, String supportedModel, ApiProvider provider) {
+            return new NativeOpenAIRoute(
+                    modelPrefix, supportedModel, channelCode, provider, null, true, true, 0L);
         }
 
         private static NativeOpenAIRoute supportedModel(String model) {
             return new NativeOpenAIRoute("", model, null, null, null, true, false, 0L);
+        }
+
+        private static NativeOpenAIRoute imageGeneration(String model) {
+            String normalized = model == null ? "" : model.trim();
+            String prefix = normalized.regionMatches(true, 0, "openai/", 0, "openai/".length())
+                    ? "openai/"
+                    : "";
+            return new NativeOpenAIRoute(
+                    prefix,
+                    normalized,
+                    null,
+                    null,
+                    IMAGE_GENERATIONS_PATH,
+                    false,
+                    !prefix.isEmpty(),
+                    IMAGE_CALL_TIMEOUT_MS);
         }
 
         private NativeOpenAIRoute withSupportedModel(String model) {
@@ -456,6 +503,35 @@ public class OpenAINativeApiService {
         return handleNonStreamingRequest(requestBody, upstreamName, clientApiKey, headers, model, MEMORIES_TRACE_SUMMARIZE_ROUTE);
     }
 
+    /** Routes an OpenAI-compatible image generation request by its explicitly supported model. */
+    public String handleImageGenerationNonStreamingRequest(
+            String requestBody,
+            String upstreamName,
+            String clientApiKey,
+            Map<String, String> headers) throws IOException {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(requestBody);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("request body must be valid JSON", exception);
+        }
+        if (root == null || !root.isObject()) {
+            throw new IllegalArgumentException("request body must be a JSON object");
+        }
+        String model = requiredText(root, "model");
+        requiredText(root, "prompt");
+        if (root.path("stream").asBoolean(false)) {
+            throw new IllegalArgumentException("image generation does not support streaming");
+        }
+        return handleNonStreamingRequest(
+                requestBody,
+                upstreamName,
+                clientApiKey,
+                headers,
+                model,
+                NativeOpenAIRoute.imageGeneration(model));
+    }
+
     private String handleNonStreamingRequest(String requestBody, String upstreamName,
                                              String clientApiKey, Map<String, String> headers, String model,
                                              NativeOpenAIRoute route) throws IOException {
@@ -507,7 +583,7 @@ public class OpenAINativeApiService {
             log.error("failing requestBody after exhausting upstreams (model={}, outboundModel={}, bytes={}): {}",
                     model, outboundModel,
                     outboundRequestBody == null ? 0 : outboundRequestBody.length(),
-                    truncateForLog(outboundRequestBody, 4000));
+                    truncateForLog(bodyForRequestLog(requestRoute.endpointPath(), outboundRequestBody), 4000));
             throw primaryException;
         }
     }
@@ -521,7 +597,7 @@ public class OpenAINativeApiService {
         String endpointPath = route.resolveEndpointPath(upstream);
         String url = buildEndpointUrl(upstream.baseUrl, endpointPath);
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
         int bodyBytes = outboundRequestBody == null ? 0 : outboundRequestBody.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         long effectiveTimeoutMs = route.callTimeoutMsOverride() > 0
                 ? route.callTimeoutMsOverride() : openAIConfig.getTimeout();
@@ -577,15 +653,17 @@ public class OpenAINativeApiService {
                         // 上游失败时把请求体打到日志, 方便线上复现 (截断, 避免炸日志)。
                         log.error("❌ [{}] failing requestBody (model={}, outboundModel={}, bytes={}): {}",
                                 requestId, originalModel, outboundModel, bodyBytes,
-                                truncateForLog(outboundRequestBody, 4000));
+                                truncateForLog(bodyForRequestLog(endpointPath, outboundRequestBody), 4000));
 
                         trackApiUsage(clientApiKey, requestId, originalModel, endpointPath, "POST",
                                 response.code(), null, duration, null, headers,
                                 "OpenAI native API error: " + responseBody);
 
                         requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
-                                endpointPath, originalModel, headers, originalRequestBody,
-                                response.code(), responseBody, duration, TokenUsage.empty(),
+                                endpointPath, originalModel, headers,
+                                bodyForRequestLog(endpointPath, originalRequestBody),
+                                response.code(), responseBodyForRequestLog(endpointPath, responseBody),
+                                duration, TokenUsage.empty(),
                                 "OpenAI native API error");
 
                         throw new IOException(
@@ -609,8 +687,10 @@ public class OpenAINativeApiService {
 
                 // 记录请求日志
                 requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
-                        endpointPath, originalModel, headers, originalRequestBody,
-                        response.code(), responseBody, duration, tokenUsage, null);
+                        endpointPath, originalModel, headers,
+                        bodyForRequestLog(endpointPath, originalRequestBody),
+                        response.code(), responseBodyForRequestLog(endpointPath, responseBody),
+                        duration, tokenUsage, null);
 
                 // 直接返回 OpenAI 原生响应
                 return responseBody;
@@ -633,13 +713,14 @@ public class OpenAINativeApiService {
                     // 网络级 IOException (超时 / 拒连) 时也把请求体打到日志, 与 HTTP 非 2xx 路径对齐。
                     log.error("❌ [{}] failing requestBody (model={}, outboundModel={}, bytes={}): {}",
                             requestId, originalModel, outboundModel, bodyBytes,
-                            truncateForLog(outboundRequestBody, 4000));
+                            truncateForLog(bodyForRequestLog(endpointPath, outboundRequestBody), 4000));
 
                     trackApiUsage(clientApiKey, requestId, originalModel, endpointPath, "POST",
                             500, null, duration, null, headers, exClass + ": " + exDetail);
 
                     requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
-                            endpointPath, originalModel, headers, originalRequestBody,
+                            endpointPath, originalModel, headers,
+                            bodyForRequestLog(endpointPath, originalRequestBody),
                             500, null, duration, TokenUsage.empty(), exClass + ": " + exDetail);
 
                     throw e;
@@ -695,7 +776,7 @@ public class OpenAINativeApiService {
     public void handleStreamingRequest(String requestBody, String upstreamName,
                                        String clientApiKey, Map<String, String> headers, SseEmitter emitter) {
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         String model = extractModelFromRequest(requestBody);
         NativeOpenAIRoute route = resolveRoute(model);
@@ -714,7 +795,7 @@ public class OpenAINativeApiService {
             return;
         }
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         String model = extractModelFromRequest(requestBody);
         handleStreamingRequest(requestBody, upstreamName, clientApiKey, headers, emitter,
@@ -728,7 +809,7 @@ public class OpenAINativeApiService {
     public void handleResponsesCompactStreamingRequest(String requestBody, String upstreamName,
                                                        String clientApiKey, Map<String, String> headers, SseEmitter emitter) {
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         String model = extractModelFromRequest(requestBody);
         handleStreamingRequest(requestBody, upstreamName, clientApiKey, headers, emitter,
@@ -935,8 +1016,15 @@ public class OpenAINativeApiService {
             };
 
             // 创建 EventSource
-            EventSource eventSource = EventSources.createFactory(getHttpClient())
-                    .newEventSource(request, listener);
+            EventSource eventSource = streamingHttpClientProvider.newEventSource(
+                    request,
+                    listener,
+                    openAIConfig.getTimeout(),
+                    openAIConfig.getTimeout(),
+                    openAIConfig.getTimeout(),
+                    requestId,
+                    "openai-native",
+                    upstream.name);
 
             // 处理 emitter 生命周期
             emitter.onTimeout(() -> {
@@ -1103,6 +1191,79 @@ public class OpenAINativeApiService {
         } catch (Exception e) {
             return "<usage-parse-error:" + e.getMessage() + ">";
         }
+    }
+
+    private String responseBodyForRequestLog(String endpointPath, String responseBody) {
+        return redactImageBodyForLog(endpointPath, responseBody, "response");
+    }
+
+    private String bodyForRequestLog(String endpointPath, String requestBody) {
+        return redactImageBodyForLog(endpointPath, requestBody, "request");
+    }
+
+    private String redactImageBodyForLog(String endpointPath, String body, String bodyKind) {
+        if (!IMAGE_GENERATIONS_PATH.equals(endpointPath) || body == null || body.isBlank()) {
+            return body;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            redactImagePayload(root, false);
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return "{\"image_" + bodyKind + "\":\"redacted\"}";
+        }
+    }
+
+    private void redactImagePayload(JsonNode node, boolean imageInputContext) {
+        if (node == null) {
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> redactImagePayload(child, imageInputContext));
+            return;
+        }
+        if (!(node instanceof ObjectNode objectNode)) {
+            return;
+        }
+        List<String> fields = new ArrayList<>();
+        objectNode.fieldNames().forEachRemaining(fields::add);
+        for (String field : fields) {
+            JsonNode value = objectNode.get(field);
+            String normalized = field.toLowerCase(Locale.ROOT);
+            if (normalized.equals("b64_json")
+                    || normalized.equals("b64json")
+                    || normalized.equals("base64")
+                    || normalized.equals("image_base64")
+                    || normalized.equals("imagebase64")
+                    || normalized.equals("imagebytes")
+                    || normalized.equals("bytesbase64encoded")
+                    || (imageInputContext && normalized.equals("data"))) {
+                int length = value != null && value.isTextual() ? value.asText().length() : 0;
+                objectNode.put(field, "<redacted:" + length + " chars>");
+            } else if (normalized.equals("url")
+                    || normalized.equals("uri")
+                    || normalized.equals("image_url")
+                    || normalized.equals("image_uri")
+                    || normalized.equals("fileuri")
+                    || normalized.equals("gcsuri")) {
+                objectNode.put(field, "<redacted-url>");
+            } else {
+                boolean nestedImageInput = imageInputContext
+                        || normalized.equals("input_images")
+                        || normalized.equals("inputimages")
+                        || normalized.equals("reference_images")
+                        || normalized.equals("referenceimages");
+                redactImagePayload(value, nestedImageInput);
+            }
+        }
+    }
+
+    private String requiredText(JsonNode root, String field) {
+        JsonNode value = root == null ? null : root.get(field);
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value.asText().trim();
     }
 
     /**

@@ -65,6 +65,11 @@ public class UpstreamConfigService {
         return snapshot().hasActiveUpstreamForChannelCode(normalizedChannelCode);
     }
 
+    public boolean hasActiveUpstreamForProviderAndChannel(ApiProvider provider, String channelCode) {
+        String normalizedChannelCode = normalizeChannelCode(channelCode);
+        return snapshot().hasActiveUpstreamForProviderAndChannel(provider, normalizedChannelCode);
+    }
+
     /**
      * 判断是否至少存在一个显式支持该模型的活跃上游。
      */
@@ -103,6 +108,11 @@ public class UpstreamConfigService {
         return snapshot().selectForChannelAndModel(channelCode, model);
     }
 
+    public UpstreamConfig selectForProviderChannelAndModel(
+            ApiProvider provider, String channelCode, String model) {
+        return snapshot().selectForProviderChannelAndModel(provider, channelCode, model);
+    }
+
     public boolean supportsModel(UpstreamConfig config, String model) {
         return UpstreamConfigSnapshot.supportsModel(config, model);
     }
@@ -136,6 +146,13 @@ public class UpstreamConfigService {
             String channelCode, String model, List<String> excludeNames) {
         String normalizedChannelCode = normalizeChannelCode(channelCode);
         return snapshot().getChannelFailoverCandidates(normalizedChannelCode, model, excludeNames);
+    }
+
+    public List<UpstreamConfig> getFailoverUpstreamsByProviderChannelAndModel(
+            ApiProvider provider, String channelCode, String model, List<String> excludeNames) {
+        String normalizedChannelCode = normalizeChannelCode(channelCode);
+        return snapshot().getProviderChannelFailoverCandidates(
+                provider, normalizedChannelCode, model, excludeNames);
     }
 
     /**

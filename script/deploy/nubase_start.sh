@@ -3,7 +3,8 @@
 # Responsibilities: roll in the new jar, gracefully stop the old process, then
 # exec the new java process so systemd keeps tracking the PID.
 #
-# All runtime config the java process needs is loaded from ${WORK_DIR}/nubase.env
+# Non-secret release defaults are loaded from ${WORK_DIR}/nubase.runtime.env.
+# Server-specific runtime config is then loaded from ${WORK_DIR}/nubase.env
 # (NOT in the repo) and exported via `set -a` below, e.g.:
 #   - metadata DB:   METADATA_DB_URL / METADATA_DB_USER / METADATA_DB_PASSWORD
 #   - tenant provisioning host: POSTGRES_HOST / POSTGRES_PORT
@@ -21,8 +22,8 @@ JAR_DIR="${WORK_DIR}/jar"          # staging dir the deploy uploads into
 LOG_DIR="${WORK_DIR}/logs"
 JVM_DIR="${WORK_DIR}/jvm"
 CURRENT_JAR="nubase.jar"
+RUNTIME_ENV_FILE="${WORK_DIR}/nubase.runtime.env"
 ENV_FILE="${WORK_DIR}/nubase.env"
-SERVER_PORT="${NUBASE_SERVER_PORT:-9999}"
 
 mkdir -p "${JAR_DIR}" "${LOG_DIR}" "${JVM_DIR}"
 
@@ -54,7 +55,19 @@ else
     echo "No running java process for ${CURRENT_JAR}."
 fi
 
-# 3. Load runtime secrets / DB / R2 config.
+# 3. Load release-owned defaults first, then server-specific config so operators can override
+#    non-secret defaults without copying secrets as part of a deployment.
+if [ -f "${RUNTIME_ENV_FILE}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${RUNTIME_ENV_FILE}"
+    set +a
+    echo "Loaded runtime defaults from ${RUNTIME_ENV_FILE}"
+else
+    echo "ERROR: ${RUNTIME_ENV_FILE} not found."
+    exit 1
+fi
+
 if [ -f "${ENV_FILE}" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -65,6 +78,13 @@ else
     echo "WARNING: ${ENV_FILE} not found — the app needs PGRST_ENCRYPTION_MASTER_KEY," \
          "METADATA_DB_* and friends to start. See nubase.env.example."
 fi
+
+if [ "${SPRING_PROFILES_ACTIVE:-}" != "prod" ]; then
+    echo "ERROR: SPRING_PROFILES_ACTIVE must be prod for this production service."
+    exit 1
+fi
+
+SERVER_PORT="${NUBASE_SERVER_PORT:-9999}"
 
 # 4. Best-effort OOM protection (inherited by the exec'd java).
 echo -100 > /proc/$$/oom_score_adj 2>/dev/null || true

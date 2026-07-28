@@ -6,7 +6,7 @@
 --
 -- Tables:
 --   ai_gateway.upstream_configs   : upstream AI providers this project forwards to
---   ai_gateway.api_keys           : self-routing gateway keys (nbk_<appCode>_<secret>)
+--   ai_gateway.api_keys           : service-role and random self-routing gateway keys
 --   ai_gateway.api_usage_logs     : per-request audit + token/cost log
 --   ai_gateway.daily_token_usage  : per-(key, day, model) rolled-up token/cost stats
 --   ai_gateway.model_pricing      : per-project editable pricing for cost calculation
@@ -51,8 +51,9 @@ COMMENT ON TABLE ai_gateway.upstream_configs IS 'Upstream AI providers this proj
 -- ==================================================
 -- ai_gateway.api_keys
 -- ==================================================
--- Self-routing gateway keys. The full key is nbk_<appCode>_<secret>; only its
--- SHA-256 hash is stored (key_hash). key_prefix is a display-only masked head.
+-- The automatically registered default credential reuses the project's existing service-role
+-- JWT. Service-role and random nbk_<appCode>_<secret> keys remain hash-only. All inbound lookups
+-- use key_hash; key_prefix is display-only.
 CREATE TABLE IF NOT EXISTS ai_gateway.api_keys
 (
     id           BIGSERIAL PRIMARY KEY,
@@ -73,7 +74,7 @@ CREATE TABLE IF NOT EXISTS ai_gateway.api_keys
 
 CREATE INDEX IF NOT EXISTS api_keys_active_idx ON ai_gateway.api_keys (is_active);
 
-COMMENT ON TABLE ai_gateway.api_keys IS 'Self-routing gateway keys for this project; lookup by key_hash.';
+COMMENT ON TABLE ai_gateway.api_keys IS 'Project gateway credentials, including the existing service-role key; lookup by key_hash.';
 
 -- ==================================================
 -- ai_gateway.api_usage_logs

@@ -1,5 +1,6 @@
 package ai.nubase.auth.service;
 
+import ai.nubase.ai.gateway.service.DefaultGatewayKeyProvisioner;
 import ai.nubase.auth.dto.request.admin.InitDatabaseRequest;
 import ai.nubase.auth.dto.response.admin.InitDatabaseResponse;
 import ai.nubase.common.enums.DatabaseInitStatus;
@@ -60,15 +61,18 @@ public class DatabaseInitService {
 
     private final DatabaseConfigRepository databaseConfigRepository;
     private final EncryptionService encryptionService;
+    private final DefaultGatewayKeyProvisioner defaultGatewayKeyProvisioner;
 
     private final JdbcTemplate metadataJdbcTemplate;
 
     public DatabaseInitService(
             DatabaseConfigRepository databaseConfigRepository,
             EncryptionService encryptionService,
+            DefaultGatewayKeyProvisioner defaultGatewayKeyProvisioner,
             @Qualifier("metadataJdbcTemplate") JdbcTemplate metadataJdbcTemplate) {
         this.databaseConfigRepository = databaseConfigRepository;
         this.encryptionService = encryptionService;
+        this.defaultGatewayKeyProvisioner = defaultGatewayKeyProvisioner;
         this.metadataJdbcTemplate = metadataJdbcTemplate;
     }
 
@@ -188,7 +192,7 @@ public class DatabaseInitService {
             // Generate the database user and password (saved but not yet created)
             String dbUser = dbName + "_user";
             String dbPassword = generateRandomPassword();
-            String jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", postgresHost, postgresPort, dbName);
+            String jdbcUrl = buildTenantJdbcUrl(dbName);
             executedSteps.add("Generated database user credentials");
 
             // Generate JWT secret and API keys
@@ -275,6 +279,9 @@ public class DatabaseInitService {
                         System.currentTimeMillis() - startTime
                 );
             }
+            boolean recoveringExistingResources =
+                    DatabaseInitStatus.INIT_FAILED.name().equals(databaseConfig.getInitStatus())
+                            || DatabaseInitStatus.INITIALIZING.name().equals(databaseConfig.getInitStatus());
 
             log.info("Starting physical database initialization for dbKey={}", dbKey);
 
@@ -292,6 +299,13 @@ public class DatabaseInitService {
             String dbPassword = encryptionService.decrypt(databaseConfig.getDbPasswordEncrypted());
             String dbName = databaseConfig.getDbName();
             String dbUser = databaseConfig.getDbUser();
+            String jdbcUrl = buildTenantJdbcUrl(dbName);
+            if (!jdbcUrl.equals(databaseConfig.getJdbcUrl())) {
+                log.warn("Refreshing stale tenant JDBC URL for dbKey={} from configured PostgreSQL endpoint",
+                        dbKey);
+                databaseConfigRepository.updateJdbcUrl(dbKey, jdbcUrl);
+                executedSteps.add("Refreshed tenant JDBC URL from the configured PostgreSQL endpoint");
+            }
 
             // Extract role information (from JWT tokens, or use defaults)
             String serviceRole = Role.SERVICE_ROLE.getValue();
@@ -299,10 +313,15 @@ public class DatabaseInitService {
             String anonRole = Role.ANON.getValue();
 
             // 3. Create the database and user
-            createDatabaseAndUser(dbName, dbUser, dbPassword, executedSteps);
+            createDatabaseAndUser(
+                    dbName,
+                    dbUser,
+                    dbPassword,
+                    recoveringExistingResources,
+                    executedSteps
+            );
 
             // 4. Connect to the new database and initialize it
-            String jdbcUrl = databaseConfig.getJdbcUrl();
             newDatabaseSuperDataSource = createDataSource(jdbcUrl, metadataUsername, metadataPassword);
             initSuperExtensions(newDatabaseSuperDataSource);
 
@@ -328,6 +347,13 @@ public class DatabaseInitService {
             );
             databaseConfigRepository.updateEnabled(dbKey, true); // Enable the configuration
             executedSteps.add("Updated status to initialized and enabled configuration");
+
+            if (aiGatewayEnabled) {
+                defaultGatewayKeyProvisioner.provision(
+                        newDatabaseDataSource,
+                        databaseConfig.getServiceRoleToken());
+                executedSteps.add("Registered service role key as the default AI Gateway key");
+            }
 
             long executionTime = System.currentTimeMillis() - startTime;
             log.info("Physical database initialization completed successfully in {}ms for dbKey={}", executionTime, dbKey);
@@ -790,21 +816,69 @@ public class DatabaseInitService {
     /**
      * Create the database and user (using metadataJdbcTemplate with superuser privileges).
      */
-    private void createDatabaseAndUser(String dbName, String dbUser, String dbPassword, List<String> executedSteps) {
+    void createDatabaseAndUser(String dbName,
+                               String dbUser,
+                               String dbPassword,
+                               boolean recoveringExistingResources,
+                               List<String> executedSteps) {
         log.info("Creating database and user: dbName={}, dbUser={}", dbName, dbUser);
 
         try {
-            // Create the database
-            String createDbSql = String.format("CREATE DATABASE %s ENCODING 'UTF8'", SqlSafe.ident(dbName));
-            metadataJdbcTemplate.execute(createDbSql);
-            log.info("Created database: {}", dbName);
-            executedSteps.add("Created database: " + dbName);
+            List<String> databaseOwners = metadataJdbcTemplate.queryForList(
+                    "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = ?",
+                    String.class,
+                    dbName
+            );
+            boolean databaseExists = !databaseOwners.isEmpty();
+            Boolean userExists = metadataJdbcTemplate.queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ?)",
+                    Boolean.class,
+                    dbUser
+            );
+            if (databaseExists && !recoveringExistingResources) {
+                throw new IllegalStateException("Database already exists: " + dbName);
+            }
+            if (Boolean.TRUE.equals(userExists) && !recoveringExistingResources) {
+                throw new IllegalStateException("Database user already exists: " + dbUser);
+            }
+            if (databaseExists) {
+                String databaseOwner = databaseOwners.get(0);
+                if (!dbUser.equals(databaseOwner) && !metadataUsername.equals(databaseOwner)) {
+                    throw new IllegalStateException(
+                            "Cannot recover database " + dbName + " because it is owned by " + databaseOwner
+                    );
+                }
+                log.info("Reusing database created by an earlier initialization attempt: {}", dbName);
+                executedSteps.add("Reused existing database: " + dbName);
+            } else {
+                String createDbSql = String.format(
+                        "CREATE DATABASE %s ENCODING 'UTF8'",
+                        SqlSafe.ident(dbName)
+                );
+                metadataJdbcTemplate.execute(createDbSql);
+                log.info("Created database: {}", dbName);
+                executedSteps.add("Created database: " + dbName);
+            }
 
-            // Create the user
-            String createUserSql = String.format("CREATE USER %s WITH PASSWORD %s", SqlSafe.ident(dbUser), SqlSafe.literal(dbPassword));
-            metadataJdbcTemplate.execute(createUserSql);
-            log.info("Created user: {}", dbUser);
-            executedSteps.add("Created user: " + dbUser);
+            if (Boolean.TRUE.equals(userExists)) {
+                String alterUserSql = String.format(
+                        "ALTER USER %s WITH PASSWORD %s",
+                        SqlSafe.ident(dbUser),
+                        SqlSafe.literal(dbPassword)
+                );
+                metadataJdbcTemplate.execute(alterUserSql);
+                log.info("Reused database user created by an earlier initialization attempt: {}", dbUser);
+                executedSteps.add("Reused existing database user: " + dbUser);
+            } else {
+                String createUserSql = String.format(
+                        "CREATE USER %s WITH PASSWORD %s",
+                        SqlSafe.ident(dbUser),
+                        SqlSafe.literal(dbPassword)
+                );
+                metadataJdbcTemplate.execute(createUserSql);
+                log.info("Created user: {}", dbUser);
+                executedSteps.add("Created user: " + dbUser);
+            }
 
             // Grant privileges
             String grantSql = String.format("GRANT ALL PRIVILEGES ON DATABASE %s TO %s", SqlSafe.ident(dbName), SqlSafe.ident(dbUser));
@@ -822,8 +896,15 @@ public class DatabaseInitService {
             // roles it belongs to) read this tenant's data. Revoke the PUBLIC default and
             // grant CONNECT only to this database's own user. The shared roles are NOLOGIN
             // and are reached via SET ROLE inside the owner's session, so they need no CONNECT.
-            metadataJdbcTemplate.execute(String.format("REVOKE CONNECT ON DATABASE %s FROM PUBLIC", dbName));
-            metadataJdbcTemplate.execute(String.format("GRANT CONNECT ON DATABASE %s TO %s", dbName, dbUser));
+            metadataJdbcTemplate.execute(String.format(
+                    "REVOKE CONNECT ON DATABASE %s FROM PUBLIC",
+                    SqlSafe.ident(dbName)
+            ));
+            metadataJdbcTemplate.execute(String.format(
+                    "GRANT CONNECT ON DATABASE %s TO %s",
+                    SqlSafe.ident(dbName),
+                    SqlSafe.ident(dbUser)
+            ));
             log.info("Restricted CONNECT on database {} to user {} (revoked PUBLIC)", dbName, dbUser);
             executedSteps.add("Restricted CONNECT on database " + dbName + " to " + dbUser + " (revoked PUBLIC)");
 
@@ -831,6 +912,10 @@ public class DatabaseInitService {
             log.error("Failed to create database and user: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to create database and user: " + e.getMessage(), e);
         }
+    }
+
+    private String buildTenantJdbcUrl(String dbName) {
+        return String.format("jdbc:postgresql://%s:%d/%s", postgresHost, postgresPort, dbName);
     }
 
     /**

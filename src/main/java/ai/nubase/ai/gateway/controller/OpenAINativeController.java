@@ -48,6 +48,30 @@ public class OpenAINativeController {
         return handleOpenAINativeRequest(requestBody, request, OpenAINativeEndpoint.RESPONSES);
     }
 
+    /** OpenAI-compatible text-to-image endpoint. */
+    @PostMapping(value = "/v1/images/generations", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> imageGenerations(
+            @RequestBody String requestBody,
+            HttpServletRequest request) {
+        try {
+            String response = openAINativeApiService.handleImageGenerationNonStreamingRequest(
+                    requestBody,
+                    request.getHeader("x-upstream"),
+                    extractClientApiKey(request),
+                    extractHeaders(request));
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(response);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(openAIError(e.getMessage(), "invalid_request_error", "invalid_request"));
+        } catch (IOException e) {
+            log.error("OpenAI image generation forwarding failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(openAIError(e.getMessage(), "upstream_error", "upstream_error"));
+        }
+    }
+
     /**
      * Codex /v1/responses/compact —— 把对话历史压缩成一段加密 context。
      * 上游本质是一次模型调用，token 计费完全沿用 /v1/responses 的逻辑：
@@ -132,6 +156,13 @@ public class OpenAINativeController {
         dto.put("created", createdEpochSec);
         dto.put("owned_by", m.getProvider() == null ? "openai" : m.getProvider().toLowerCase(Locale.ROOT));
         return dto;
+    }
+
+    private Map<String, Object> openAIError(String message, String type, String code) {
+        return Map.of("error", Map.of(
+                "message", message == null ? "Image generation failed" : message,
+                "type", type,
+                "code", code));
     }
 
     private Object handleOpenAINativeRequest(
@@ -228,7 +259,7 @@ public class OpenAINativeController {
     private String extractClientApiKey(HttpServletRequest request) {
         // 尝试 x-api-key 头
         String apiKey = request.getHeader("x-api-key");
-        if (apiKey != null && GatewayKeyUtil.isGatewayKey(apiKey.trim())) {
+        if (apiKey != null && GatewayKeyUtil.isGatewayCredential(apiKey.trim())) {
             return apiKey.trim();
         }
 
@@ -236,7 +267,7 @@ public class OpenAINativeController {
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String bearer = authHeader.substring(7).trim();
-            if (GatewayKeyUtil.isGatewayKey(bearer)) {
+            if (GatewayKeyUtil.isGatewayCredential(bearer)) {
                 return bearer;
             }
         }

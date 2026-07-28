@@ -42,17 +42,16 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * AI 网关数据面鉴权过滤器（自路由项目密钥）。
+ * AI Gateway data-plane authentication filter.
  * <p>
- * 外部 AI 客户端（Claude Code / OpenAI SDK 等）以 {@code nbk_<appCode>_<secret>} 形式的项目密钥访问，
- * 经 {@code x-api-key} 或 {@code Authorization: Bearer} 传入。本过滤器：
+ * External clients authenticate with the project service-role JWT or a random
+ * {@code nbk_<appCode>_<secret>} key through {@code x-api-key} or
+ * {@code Authorization: Bearer}. This filter:
  * <ol>
- *   <li>从密钥前缀解析 appCode；</li>
- *   <li>{@code findByAppCode} 定位项目并设置 {@link MultiTenancyContext}（与 UnifiedMultiTenancyFilter 同款）；</li>
- *   <li>在租户上下文里按密钥哈希校验 {@code ai_gateway.api_keys}（启用 / 未撤销 / 未过期）。</li>
+ *   <li>resolves the project from the credential;</li>
+ *   <li>sets {@link MultiTenancyContext};</li>
+ *   <li>validates the credential hash and its active, revoked, and expiry state.</li>
  * </ol>
- * 仅作用于数据面路径，且这些路径在 UnifiedMultiTenancyFilter 的 NON_FILTERED 列表内被跳过，
- * 因此租户上下文唯一来源是本过滤器。
  */
 @Slf4j
 @Component
@@ -88,7 +87,7 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
 
         String projectApiKey = extractProjectApiKey(request);
         String userBearer = extractBearer(request);
-        if (projectApiKey != null && userBearer != null && !GatewayKeyUtil.isGatewayKey(userBearer)) {
+        if (projectApiKey != null && userBearer != null && !GatewayKeyUtil.isGatewayCredential(userBearer)) {
             authenticateProjectUser(request, response, filterChain, projectApiKey, userBearer);
             return;
         }
@@ -100,15 +99,22 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
                                         HttpServletResponse response,
                                         FilterChain filterChain,
                                         String key) throws IOException, ServletException {
-        String appCode = GatewayKeyUtil.parseAppCode(key);
+        String serviceRoleAppCode = GatewayKeyUtil.parseServiceRoleAppCode(key);
+        boolean serviceRoleKey = serviceRoleAppCode != null;
+        String appCode = serviceRoleKey
+                ? serviceRoleAppCode
+                : GatewayKeyUtil.parseAppCode(key);
         if (appCode == null) {
             unauthorized(response, "Cannot resolve project from gateway API key");
             return;
         }
-
         DatabaseConfig dbConfig = databaseConfigRepository.findByAppCode(appCode);
         if (dbConfig == null || !dbConfig.isAvailable()) {
             unauthorized(response, "Invalid project or project not enabled");
+            return;
+        }
+        if (serviceRoleKey && !validateServiceRoleKey(key, appCode, dbConfig)) {
+            unauthorized(response, "Invalid or expired service role key");
             return;
         }
 
@@ -129,7 +135,7 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
                     .databaseKey(dbConfig.getDbKey())
                     .databaseConfig(dbConfig)
                     .apikey(key)
-                    .serviceRole(false)
+                    .serviceRole(serviceRoleKey)
                     .build();
             MultiTenancyContext.setContext(ctx);
 
@@ -228,6 +234,20 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
         return k.getExpiresAt() == null || k.getExpiresAt().isAfter(LocalDateTime.now());
     }
 
+    private boolean validateServiceRoleKey(String key, String appCode, DatabaseConfig dbConfig) {
+        try {
+            Claims claims = Jwts.parser()
+                    .setSigningKey(Keys.hmacShaKeyFor(dbConfig.getJwtSecret().getBytes(StandardCharsets.UTF_8)))
+                    .build()
+                    .parseClaimsJws(key)
+                    .getBody();
+            return appCode.equals(claims.get("ref", String.class))
+                    && Role.SERVICE_ROLE.getValue().equals(claims.get("role", String.class));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private boolean isDataPlane(String path) {
         for (String prefix : DATA_PLANE_PREFIXES) {
             if (path.startsWith(prefix)) {
@@ -243,11 +263,11 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
 
     private String extractGatewayKey(HttpServletRequest request) {
         String apiKey = request.getHeader("x-api-key");
-        if (apiKey != null && !apiKey.isBlank() && GatewayKeyUtil.isGatewayKey(apiKey.trim())) {
+        if (apiKey != null && !apiKey.isBlank() && GatewayKeyUtil.isGatewayCredential(apiKey.trim())) {
             return apiKey.trim();
         }
         String bearer = extractBearer(request);
-        if (bearer != null && GatewayKeyUtil.isGatewayKey(bearer)) {
+        if (bearer != null && GatewayKeyUtil.isGatewayCredential(bearer)) {
             return bearer;
         }
         return null;

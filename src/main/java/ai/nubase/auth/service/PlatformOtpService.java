@@ -8,6 +8,8 @@ import ai.nubase.platform.mail.PlatformEmailService.Purpose;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,10 +29,13 @@ import java.util.Optional;
 @Slf4j
 public class PlatformOtpService {
 
+    static final String LOCAL_DEVELOPMENT_CODE = "123456";
+
     private final PlatformOneTimeTokenRepository tokenRepository;
     private final TokenGenerator tokenGenerator;
     private final RateLimiterService rateLimiter;
     private final PlatformEmailService emailService;
+    private final Environment environment;
 
     @Value("${nubase.platform.otp.length:6}")
     private int codeLength;
@@ -38,20 +43,30 @@ public class PlatformOtpService {
     @Value("${nubase.platform.otp.expiration-seconds:600}")
     private long expirationSeconds;
 
-    /** Generate a code, persist its hash (replacing any pending code for this email+purpose), email it. */
+    /**
+     * Generate a code and persist its hash, replacing any pending code for this email and purpose.
+     * Development profiles use a fixed code without sending email; other profiles email a random code.
+     */
     @Transactional("metadataTransactionManager")
     public void issue(String rawEmail, Purpose purpose) {
         String email = normalize(rawEmail);
         String storageKey = storageKey(purpose);
         rateLimiter.checkRate("platform_otp:" + storageKey, email);
 
-        String code = tokenGenerator.generateNumericOTP(codeLength);
+        boolean localDevelopment = isLocalDevelopment();
+        String code = localDevelopment
+                ? LOCAL_DEVELOPMENT_CODE
+                : tokenGenerator.generateNumericOTP(codeLength);
         // Atomic upsert on the (email, purpose) unique key: replaces any pending code in one statement,
         // so two concurrent issue() calls (e.g. double-clicked "resend") can't race into a constraint
         // violation, and there's no Hibernate insert-before-delete flush-ordering hazard.
         tokenRepository.upsert(email, storageKey,
                 tokenGenerator.sha256(code), Instant.now().plusSeconds(expirationSeconds));
 
+        if (localDevelopment) {
+            log.info("Platform OTP email skipped for local development (purpose={})", purpose);
+            return;
+        }
         emailService.sendOtp(email, code, purpose, expirationSeconds);
     }
 
@@ -102,6 +117,10 @@ public class PlatformOtpService {
 
     private static String normalize(String email) {
         return email == null ? "" : email.trim().toLowerCase();
+    }
+
+    private boolean isLocalDevelopment() {
+        return environment.acceptsProfiles(Profiles.of("dev", "local"));
     }
 
     private static String storageKey(Purpose purpose) {

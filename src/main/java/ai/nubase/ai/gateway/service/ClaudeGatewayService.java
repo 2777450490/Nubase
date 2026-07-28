@@ -1,5 +1,6 @@
 package ai.nubase.ai.gateway.service;
 
+import ai.nubase.ai.gateway.billing.GatewayRequestContext;
 import ai.nubase.ai.gateway.dto.ApiUsageRecord;
 import ai.nubase.ai.gateway.dto.TokenUsage;
 import ai.nubase.ai.gateway.platform.GatewayRoutingContext;
@@ -15,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
-import okhttp3.sse.EventSources;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -48,8 +48,8 @@ public class ClaudeGatewayService {
     private final UpstreamConfigService upstreamConfigService;
     private final PlatformUpstreamService platformUpstreamService;
     private final ContextPruneService contextPruneService;
+    private final AiGatewayStreamingHttpClientProvider streamingHttpClientProvider;
     private OkHttpClient httpClient;
-    private OkHttpClient streamingHttpClient;
 
     /**
      * 初始化 HTTP 客户端，使用配置的超时时间
@@ -63,17 +63,6 @@ public class ClaudeGatewayService {
                     .build();
         }
         return httpClient;
-    }
-
-    private OkHttpClient getStreamingHttpClient() {
-        if (streamingHttpClient == null) {
-            streamingHttpClient = new OkHttpClient.Builder()
-                    .connectTimeout(anthropicConfig.getTimeout(), TimeUnit.MILLISECONDS)
-                    .readTimeout(0, TimeUnit.MILLISECONDS)
-                    .writeTimeout(anthropicConfig.getTimeout(), TimeUnit.MILLISECONDS)
-                    .build();
-        }
-        return streamingHttpClient;
     }
 
     /**
@@ -173,7 +162,7 @@ public class ClaudeGatewayService {
     public String forwardGetRequest(String path, Map<String, String> headers, String clientApiKey) throws IOException {
         String url = anthropicConfig.getBaseUrl() + path;
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         log.info("📤 [{}] GET {} - API Key: {}", requestId, path, ApiKeyLogMask.mask(clientApiKey));
 
@@ -299,7 +288,7 @@ public class ClaudeGatewayService {
         }
         UpstreamInfo upstream = getUpstreamInfo(upstreamName, provider);
 
-        String nonStreamRequestId = UUID.randomUUID().toString();
+        String nonStreamRequestId = GatewayRequestContext.currentOrNewString();
         ContextPruneService.PruneResult prune = contextPruneService.pruneIfNeeded(
                 requestBody, upstream.maxInputTokens, nonStreamRequestId);
         if (prune.pruned) {
@@ -381,7 +370,7 @@ public class ClaudeGatewayService {
                                               String clientApiKey, UpstreamInfo upstream, String model) throws IOException {
         String url = upstream.baseUrl + path;
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         log.info("agent_log [{}] POST {} - 模型: {}, API Key: {}, 上游: {}",
                 requestId, path, model, ApiKeyLogMask.mask(clientApiKey), upstream.name);
@@ -521,7 +510,7 @@ public class ClaudeGatewayService {
             throws IOException {
         String url = anthropicConfig.getBaseUrl() + "/v1/messages/count_tokens";
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         log.info("========================================");
         log.info("🔢 转发 Count Tokens 请求到 Claude API");
@@ -632,7 +621,7 @@ public class ClaudeGatewayService {
         UpstreamInfo upstream = getUpstreamInfo(null, ai.nubase.common.enums.ApiProvider.CLAUDE);
         String url = upstream.baseUrl + path;
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         log.info("📤 [{}] POST {} (multipart) - filename={}, size={}, content-type={}, upstream={}",
                 requestId, path, file.getOriginalFilename(), file.getSize(), file.getContentType(),
@@ -706,7 +695,7 @@ public class ClaudeGatewayService {
         UpstreamInfo upstream = getUpstreamInfo(null, ai.nubase.common.enums.ApiProvider.CLAUDE);
         String url = upstream.baseUrl + path;
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         log.info("📤 [{}] GET {} (binary download) - upstream={}", requestId, path, upstream.name);
 
@@ -797,7 +786,7 @@ public class ClaudeGatewayService {
         UpstreamInfo upstream = getUpstreamInfo(null, provider);
         String url = upstream.baseUrl + path;
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
         String upperMethod = method == null ? "GET" : method.toUpperCase(Locale.ROOT);
 
         log.info("📤 [{}] {} {} - upstream={}", requestId, upperMethod, path, upstream.name);
@@ -950,7 +939,7 @@ public class ClaudeGatewayService {
         final ai.nubase.common.enums.ApiProvider resolvedProvider = provider;
         UpstreamInfo primaryUpstream = getUpstreamInfo(upstreamName, resolvedProvider);
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         // Streaming SSE callbacks fire on OkHttp dispatcher threads, which do NOT carry the request
         // thread's ThreadLocals. Capture tenant context + routing source here (request thread) so the
@@ -1289,8 +1278,15 @@ public class ClaudeGatewayService {
                     }
                 };
 
-                EventSource eventSource = EventSources.createFactory(getStreamingHttpClient())
-                        .newEventSource(request, listener);
+                EventSource eventSource = streamingHttpClientProvider.newEventSource(
+                        request,
+                        listener,
+                        anthropicConfig.getTimeout(),
+                        0,
+                        anthropicConfig.getTimeout(),
+                        requestId,
+                        "claude-compatible",
+                        selectedUpstream.name);
                 EventSource previous = activeEventSource.getAndSet(eventSource);
                 if (previous != null && previous != eventSource) {
                     previous.cancel();

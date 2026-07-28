@@ -17,7 +17,7 @@ spring:
   application:
     name: nubase
   profiles:
-    active: dev
+    default: dev
 
   # Metadata database connection. This is the only datasource the application strictly needs
   # at startup — it stores tenant configuration, platform users, and runtime settings.
@@ -105,6 +105,14 @@ spring:
 
 server:
   port: 9999
+
+# Zenmux Vertex AI proxy used by the dedicated OpenAI image generation client.
+zenmux:
+  api-key: ${ZENMUX_API_KEY:}
+  base-url: ${ZENMUX_BASE_URL:https://zenmux.ai/api/vertex-ai}
+  api-version: ${ZENMUX_API_VERSION:v1}
+  image-timeout-ms: ${ZENMUX_IMAGE_TIMEOUT_MS:180000}
+  video-timeout-ms: ${ZENMUX_VIDEO_TIMEOUT_MS:300000}
 
 # Spring AI MCP service configuration
 
@@ -221,6 +229,8 @@ nubase:
   # its own ai_gateway schema (upstream configs, keys, usage logs, daily stats, pricing).
   ai-gateway:
     enabled: true
+    image:
+      default-model: ${NUBASE_AI_GATEWAY_IMAGE_DEFAULT_MODEL:openai/gpt-image-2}
 
   # Static asset CDN module ("Assets"). Managed via the /assets/admin/v1 control plane
   # (service_role), Studio, and MCP tools.
@@ -355,6 +365,13 @@ openai:
   base-url: ${OPENAI_BASE_URL:https://api.openai.com}
   timeout: 60000
   max-retries: 3
+
+ai:
+  gateway:
+    streaming:
+      dispatcher:
+        max-requests: ${AI_GATEWAY_STREAMING_MAX_REQUESTS:128}
+        max-requests-per-host: ${AI_GATEWAY_STREAMING_MAX_REQUESTS_PER_HOST:32}
 
 
 # Multi-database routing configuration

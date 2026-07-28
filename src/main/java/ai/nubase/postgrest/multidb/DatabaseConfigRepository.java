@@ -321,6 +321,23 @@ public class DatabaseConfigRepository {
     }
 
     /**
+     * Update the generated tenant JDBC URL after the configured PostgreSQL endpoint changes.
+     */
+    @CacheEvict(value = "databaseConfigs", key = "#dbKey")
+    public void updateJdbcUrl(String dbKey, String jdbcUrl) {
+        log.info("Updating JDBC URL for database configuration: {}", dbKey);
+
+        String sql = """
+                UPDATE public.database_configs
+                SET jdbc_url = ?,
+                    updated_at = NOW()
+                WHERE db_key = ?
+                """;
+
+        metadataJdbcTemplate.update(sql, jdbcUrl, dbKey);
+    }
+
+    /**
      * Replace the exposed schemas list and extra search path for a tenant.
      *
      * <p>Both fields are stored as PostgreSQL {@code TEXT[]}. {@code null} values are left

@@ -136,7 +136,7 @@ const TABS: { value: Tab; icon: LucideIcon; label: string }[] = [
   { value: 'routes', icon: Route, label: 'Routes' },
   { value: 'keys', icon: KeyRound, label: 'API Keys' },
   { value: 'logs', icon: SlidersHorizontal, label: 'Logs' },
-  { value: 'pricing', icon: WalletCards, label: 'Pricing' },
+  { value: 'pricing', icon: WalletCards, label: 'Cost estimates' },
 ];
 
 export default function AiGatewayPage({ params }: { params: { ref: string } }) {
@@ -202,7 +202,7 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
             <div>
               <h1 className="text-base font-semibold">AI Gateway</h1>
               <p className="text-xs text-muted-foreground">
-                Project routing, keys, pricing and usage for <span className="font-mono">{projectRef}</span>.
+                Project routing, keys, cost estimates and usage for <span className="font-mono">{projectRef}</span>.
               </p>
             </div>
           </div>
@@ -557,8 +557,10 @@ function PricingPanel({ apikey, rows, onChanged }: { apikey: string; rows: Prici
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-sm font-semibold">Model pricing</h2>
-        <p className="text-xs text-muted-foreground">Used for cost analytics only.</p>
+        <h2 className="text-sm font-semibold">Project cost estimates</h2>
+        <p className="text-xs text-muted-foreground">
+          Used for project-level cost analytics only. Does not affect customer billing.
+        </p>
       </div>
       <Table
         headers={['Model', 'Provider', 'Input / 1M', 'Output / 1M', 'Currency', 'Status', '']}

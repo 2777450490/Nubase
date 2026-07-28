@@ -10,9 +10,8 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * 自路由网关密钥实体（位于各项目租户库的 ai_gateway.api_keys）。
- * 完整密钥形如 nbk_&lt;appCode&gt;_&lt;secret&gt;，库内只存其 SHA-256 哈希(keyHash)。
- * userId 可选，指向本项目租户库 auth.users(id)（UUID）。
+ * AI Gateway credential stored in each project's {@code ai_gateway.api_keys} table.
+ * Supports the existing project service-role JWT and random nbk credentials.
  */
 @Data
 @NoArgsConstructor
@@ -29,11 +28,11 @@ public class ApiKey {
     @Column(name = "user_id")
     private UUID userId;
 
-    /** 旧字段，保留兼容；新自路由密钥仅存 keyHash，本列可为空。 */
+    /** Legacy plaintext field. Service-role and random credentials remain hash-only. */
     @Column(name = "api_key", length = 255)
     private String apiKey;
 
-    /** 完整密钥的 SHA-256 十六进制哈希，入站校验按此列查找。 */
+    /** SHA-256 credential hash used for inbound lookup. */
     @Column(name = "key_hash", unique = true, length = 64)
     private String keyHash;
 

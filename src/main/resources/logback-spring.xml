@@ -174,7 +174,7 @@
     </springProfile>
 
     <!-- Spring Profile: release (production) -->
-    <springProfile name="release | release_zh">
+    <springProfile name="prod | release | release_zh">
         <logger name="ai.nubase" level="INFO"/>
         <logger name="org.springframework" level="WARN"/>
         <logger name="org.hibernate" level="WARN"/>

@@ -1,6 +1,7 @@
 package ai.nubase.common.config;
 
 import ai.nubase.ai.gateway.filter.GatewayApiKeyAuthFilter;
+import ai.nubase.ai.gateway.billing.BillingAdmissionFilter;
 import ai.nubase.common.multitenancy.UnifiedMultiTenancyFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,7 @@ public class SecurityConfig {
 
     private final UnifiedMultiTenancyFilter unifiedMultiTenancyFilter;
     private final GatewayApiKeyAuthFilter gatewayApiKeyAuthFilter;
+    private final BillingAdmissionFilter billingAdmissionFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -88,7 +90,8 @@ public class SecurityConfig {
                 )
                 // Data-plane gateway-key auth must run BEFORE the Supabase-apikey tenant filter.
                 .addFilterBefore(unifiedMultiTenancyFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(gatewayApiKeyAuthFilter, UnifiedMultiTenancyFilter.class);
+                .addFilterBefore(gatewayApiKeyAuthFilter, UnifiedMultiTenancyFilter.class)
+                .addFilterAfter(billingAdmissionFilter, GatewayApiKeyAuthFilter.class);
 
         return http.build();
     }

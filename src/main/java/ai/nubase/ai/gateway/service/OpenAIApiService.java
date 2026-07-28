@@ -1,5 +1,6 @@
 package ai.nubase.ai.gateway.service;
 
+import ai.nubase.ai.gateway.billing.GatewayRequestContext;
 import ai.nubase.ai.gateway.converter.ClaudeToOpenAIConverter;
 import ai.nubase.ai.gateway.converter.OpenAIToClaudeConverter;
 import ai.nubase.ai.gateway.dto.ApiUsageRecord;
@@ -15,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
-import okhttp3.sse.EventSources;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,7 +25,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,6 +48,7 @@ public class OpenAIApiService {
     private final ApiUsageTrackingService usageTrackingService;
     private final ApiRequestLogService requestLogService;
     private final UpstreamConfigService upstreamConfigService;
+    private final AiGatewayStreamingHttpClientProvider streamingHttpClientProvider;
 
     private OkHttpClient httpClient;
 
@@ -195,7 +195,7 @@ public class OpenAIApiService {
                                                     Map<String, String> headers, UpstreamInfo upstream) throws IOException {
         String url = upstream.baseUrl + "/v1/chat/completions";
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         // 将 Claude 请求转换为 OpenAI 格式
         OpenAIRequest openAIRequest = claudeToOpenAIConverter.convertRequest(claudeRequestJson);
@@ -345,7 +345,7 @@ public class OpenAIApiService {
         UpstreamInfo upstream = getUpstreamInfo(upstreamName, provider, initialModel);
         String url = upstream.baseUrl + "/v1/chat/completions";
         long startTime = System.currentTimeMillis();
-        String requestId = UUID.randomUUID().toString();
+        String requestId = GatewayRequestContext.currentOrNewString();
 
         try {
             // Convert Claude request to OpenAI format
@@ -545,8 +545,15 @@ public class OpenAIApiService {
             };
 
             // Create EventSource
-            EventSource eventSource = EventSources.createFactory(getHttpClient())
-                    .newEventSource(request, listener);
+            EventSource eventSource = streamingHttpClientProvider.newEventSource(
+                    request,
+                    listener,
+                    openAIConfig.getTimeout(),
+                    openAIConfig.getTimeout(),
+                    openAIConfig.getTimeout(),
+                    requestId,
+                    "openai-compatible",
+                    upstream.name);
 
             // Handle emitter lifecycle
             emitter.onTimeout(() -> {

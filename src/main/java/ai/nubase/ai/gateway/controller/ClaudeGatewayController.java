@@ -423,7 +423,7 @@ public class ClaudeGatewayController {
     private String extractClientApiKey(HttpServletRequest request) {
         // Try x-api-key header first
         String apiKey = request.getHeader("x-api-key");
-        if (apiKey != null && GatewayKeyUtil.isGatewayKey(apiKey.trim())) {
+        if (apiKey != null && GatewayKeyUtil.isGatewayCredential(apiKey.trim())) {
             return apiKey.trim();
         }
 
@@ -431,7 +431,7 @@ public class ClaudeGatewayController {
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String bearer = authHeader.substring(7).trim();
-            if (GatewayKeyUtil.isGatewayKey(bearer)) {
+            if (GatewayKeyUtil.isGatewayCredential(bearer)) {
                 return bearer;
             }
         }

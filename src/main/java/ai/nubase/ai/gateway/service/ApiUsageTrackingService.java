@@ -1,5 +1,6 @@
 package ai.nubase.ai.gateway.service;
 
+import ai.nubase.ai.gateway.billing.BillingService;
 import ai.nubase.ai.gateway.dto.ApiUsageRecord;
 import ai.nubase.ai.gateway.dto.TokenUsage;
 import ai.nubase.ai.gateway.entity.ApiKey;
@@ -36,6 +37,7 @@ public class ApiUsageTrackingService {
     private final PricingService pricingService;
     private final ObjectMapper objectMapper;
     private final ai.nubase.ai.gateway.platform.PlatformUsageTrackingService platformUsageTrackingService;
+    private final BillingService billingService;
 
     /**
      * 从Claude API响应中提取token使用量
@@ -132,6 +134,15 @@ public class ApiUsageTrackingService {
     @Transactional
     public void trackUsage(ApiUsageRecord record) {
         try {
+            // Central billing is request-idempotent and independent of tenant reporting.
+            // If it cannot settle, the reservation remains visible for reconciliation.
+            try {
+                billingService.recordUsage(record);
+            } catch (Exception billingFailure) {
+                log.error("Central billing settlement failed for requestId={}: {}",
+                        record == null ? null : record.getRequestId(), billingFailure.getMessage(), billingFailure);
+            }
+
             String apiKey = record.getApiKey();
             UUID authenticatedUserId = resolveAuthenticatedUserId(record);
 

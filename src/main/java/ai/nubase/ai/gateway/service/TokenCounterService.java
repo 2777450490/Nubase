@@ -43,6 +43,18 @@ public class TokenCounterService {
                 totalTokens += estimateTokens(systemPrompt);
             }
 
+            // OpenAI Responses uses instructions + input instead of system + messages.
+            if (root.has("instructions")) {
+                totalTokens += estimateTokens(root.get("instructions").asText());
+            }
+
+            if (root.has("input")) {
+                JsonNode input = root.get("input");
+                totalTokens += input.isTextual()
+                        ? estimateTokens(input.asText())
+                        : estimateTokens(input.toString());
+            }
+
             // 2. 计算 messages 的 token
             if (root.has("messages")) {
                 JsonNode messages = root.get("messages");

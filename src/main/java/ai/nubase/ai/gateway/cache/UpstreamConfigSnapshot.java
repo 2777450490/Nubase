@@ -156,6 +156,16 @@ public class UpstreamConfigSnapshot {
                 && !byChannelCode.get(normalizedChannelCode).isEmpty();
     }
 
+    public boolean hasActiveUpstreamForProviderAndChannel(ApiProvider provider, String channelCode) {
+        if (provider == null) {
+            return false;
+        }
+        String normalizedChannelCode = normalizeChannelCode(channelCode);
+        return normalizedChannelCode != null
+                && byChannelCode.getOrDefault(normalizedChannelCode, List.of()).stream()
+                .anyMatch(config -> provider == config.getProvider());
+    }
+
     public boolean hasActiveUpstreamForProviderModel(ApiProvider provider, String model) {
         return !getExplicitProviderModelCandidates(provider, model).isEmpty();
     }
@@ -215,6 +225,32 @@ public class UpstreamConfigSnapshot {
         return defaultUpstream;
     }
 
+    public UpstreamConfig selectForProviderChannelAndModel(
+            ApiProvider provider, String channelCode, String model) {
+        String normalizedChannelCode = requireChannelCode(channelCode);
+        List<UpstreamConfig> providerChannelCandidates = getProviderChannelCandidates(
+                provider, normalizedChannelCode);
+        UpstreamConfig defaultUpstream = chooseDefault(providerChannelCandidates)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No active upstream found for provider/channel: "
+                                + provider + "/" + normalizedChannelCode));
+
+        String normalizedModel = normalizeModel(model);
+        if (normalizedModel == null || supportsModel(defaultUpstream, normalizedModel)) {
+            return defaultUpstream;
+        }
+
+        List<UpstreamConfig> explicitCandidates = getExplicitProviderModelCandidates(provider, normalizedModel)
+                .stream()
+                .filter(config -> normalizedChannelCode.equals(resolveChannelCode(config)))
+                .toList();
+        if (!explicitCandidates.isEmpty()) {
+            return explicitCandidates.get(0);
+        }
+
+        return defaultUpstream;
+    }
+
     public List<UpstreamConfig> getProviderFailoverCandidates(
             ApiProvider provider, String model, List<String> excludedNames) {
         List<UpstreamConfig> explicitCandidates = getExplicitProviderModelCandidates(provider, model);
@@ -233,6 +269,18 @@ public class UpstreamConfigSnapshot {
             return excludeByName(explicitCandidates, excludedNames);
         }
         return excludeByName(byChannelCode.getOrDefault(normalizedChannelCode, List.of()), excludedNames);
+    }
+
+    public List<UpstreamConfig> getProviderChannelFailoverCandidates(
+            ApiProvider provider, String channelCode, String model, List<String> excludedNames) {
+        String normalizedChannelCode = requireChannelCode(channelCode);
+        List<UpstreamConfig> explicitCandidates = getExplicitProviderModelCandidates(provider, model).stream()
+                .filter(config -> normalizedChannelCode.equals(resolveChannelCode(config)))
+                .toList();
+        if (!explicitCandidates.isEmpty()) {
+            return excludeByName(explicitCandidates, excludedNames);
+        }
+        return excludeByName(getProviderChannelCandidates(provider, normalizedChannelCode), excludedNames);
     }
 
     public List<UpstreamConfig> getSupportedModelCandidates(String model, List<String> excludedNames) {
@@ -307,6 +355,16 @@ public class UpstreamConfigSnapshot {
         }
         Map<String, List<UpstreamConfig>> modelIndex = byProviderAndModel.getOrDefault(provider, Map.of());
         return mergeModelCandidates(modelIndex, normalizedModel);
+    }
+
+    private List<UpstreamConfig> getProviderChannelCandidates(ApiProvider provider, String channelCode) {
+        if (provider == null) {
+            return List.of();
+        }
+        return byChannelCode.getOrDefault(channelCode, List.of()).stream()
+                .filter(config -> provider == config.getProvider())
+                .sorted(ROUTING_ORDER)
+                .toList();
     }
 
     private List<UpstreamConfig> getExplicitChannelModelCandidates(String channelCode, String model) {

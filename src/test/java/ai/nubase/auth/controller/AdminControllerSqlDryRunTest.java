@@ -6,6 +6,7 @@ import ai.nubase.auth.service.AdminService;
 import ai.nubase.auth.service.DatabaseInitService;
 import ai.nubase.auth.service.PlatformExternalIdentityService;
 import ai.nubase.auth.service.ProjectOwnershipService;
+import ai.nubase.auth.service.ProjectProvisioningService;
 import ai.nubase.auth.service.RlsPolicyExportService;
 import ai.nubase.auth.service.SchemaDdlExportService;
 import ai.nubase.auth.service.SchemaInitService;
@@ -45,6 +46,7 @@ class AdminControllerSqlDryRunTest {
                 sqlExecutionService,
                 mock(SchemaInitService.class),
                 mock(DatabaseInitService.class),
+                mock(ProjectProvisioningService.class),
                 mock(SchemaDdlExportService.class),
                 mock(RlsPolicyExportService.class),
                 mock(DatabaseConfigRepository.class),

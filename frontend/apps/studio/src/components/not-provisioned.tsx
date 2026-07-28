@@ -6,6 +6,12 @@ import { useRouter } from 'next/navigation';
 import { CloudOff, Loader2, Zap } from 'lucide-react';
 import { Button, Card, CardContent } from '@nubase/ui';
 import { apiFetch, fetchAllProjects, type ApiError } from '@/lib/api';
+import {
+  pollProjectProvisioning,
+  ProjectProvisioningFailedError,
+  ProjectProvisioningTimeoutError,
+  type ProjectProvisioningStatus,
+} from '@/lib/project-provisioning';
 import { useSession, type ProjectContext } from '@/lib/session';
 import { useProjectRef } from '@/lib/route-params';
 
@@ -14,28 +20,69 @@ interface NotProvisionedProps {
   initStatus?: string | null;
 }
 
+type ProvisioningFailureKind = 'database' | 'monitoring' | 'request';
+
+interface ProvisioningFailure {
+  kind: ProvisioningFailureKind;
+  message: string;
+}
+
 /**
  * Shown on data pages while the project's database isn't initialised yet. The user
  * shouldn't have to click anything: provisioning starts automatically on mount and
  * this just reports progress, falling back to a manual retry if it fails.
  */
-export function NotProvisioned({ projectRef, initStatus }: NotProvisionedProps) {
+export function NotProvisioned({
+  projectRef,
+  initStatus,
+}: NotProvisionedProps) {
   const router = useRouter();
   const { platformKey, project, setProject } = useSession();
   const resolvedProjectRef = useProjectRef(projectRef);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const autoStarted = useRef(false);
+  const [observedStatus, setObservedStatus] = useState(initStatus ?? null);
+  const [failure, setFailure] = useState<ProvisioningFailure | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef(0);
 
   async function provision() {
     if (!platformKey || !resolvedProjectRef) return;
+    const runId = ++runIdRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setRunning(true);
-    setError(null);
+    setFailure(null);
     try {
-      await apiFetch(`/auth/v1/admin/projects/${encodeURIComponent(resolvedProjectRef)}/provision`, {
-        method: 'POST',
-        apikey: platformKey,
-      });
+      await apiFetch(
+        `/auth/v1/admin/projects/${encodeURIComponent(resolvedProjectRef)}/provision`,
+        {
+          method: 'POST',
+          apikey: platformKey,
+          authScope: 'platform',
+          signal: controller.signal,
+        },
+      );
+      await pollProjectProvisioning(
+        () =>
+          apiFetch<ProjectProvisioningStatus>(
+            `/auth/v1/admin/projects/${encodeURIComponent(resolvedProjectRef)}/provision`,
+            {
+              apikey: platformKey,
+              authScope: 'platform',
+              signal: controller.signal,
+            },
+          ),
+        {
+          signal: controller.signal,
+          onStatus: (status) => {
+            if (runId === runIdRef.current) {
+              setObservedStatus(status.initStatus);
+            }
+          },
+        },
+      );
+      if (runId !== runIdRef.current) return;
       const refreshed = await fetchProject(platformKey, resolvedProjectRef);
       if (refreshed) {
         setProject(refreshed);
@@ -44,23 +91,51 @@ export function NotProvisioned({ projectRef, initStatus }: NotProvisionedProps) 
       }
       router.refresh();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Provision failed.');
+      if (controller.signal.aborted || runId !== runIdRef.current) return;
+      if (err instanceof ProjectProvisioningFailedError) {
+        setObservedStatus(err.status.initStatus);
+        setFailure({ kind: 'database', message: err.message });
+      } else if (err instanceof ProjectProvisioningTimeoutError) {
+        setObservedStatus(err.lastStatus.initStatus);
+        setFailure({ kind: 'monitoring', message: err.message });
+      } else {
+        setFailure({
+          kind: 'request',
+          message:
+            (err as ApiError).message ??
+            'Unable to start or monitor provisioning.',
+        });
+      }
     } finally {
-      setRunning(false);
+      if (runId === runIdRef.current) {
+        setRunning(false);
+      }
     }
   }
 
-  // Kick off provisioning automatically the moment this lands — no manual click.
-  // Fires once per mount; on failure the manual retry button below takes over.
+  // Strict Mode mounts this effect twice in development. Aborting the previous run and
+  // relying on backend per-project deduplication keeps both the browser and worker safe.
   useEffect(() => {
-    if (autoStarted.current) return;
     if (!platformKey || !resolvedProjectRef) return;
-    autoStarted.current = true;
     void provision();
+    return () => {
+      controllerRef.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platformKey, resolvedProjectRef]);
 
-  const failed = !!error && !running;
+  const failed = !!failure && !running;
+  const currentStatus = observedStatus ?? initStatus ?? 'unknown';
+  const failureTitle =
+    failure?.kind === 'database'
+      ? 'Database provisioning failed'
+      : failure?.kind === 'monitoring'
+        ? 'Database provisioning is taking longer than expected'
+        : 'Unable to monitor database provisioning';
+  const failureDescription =
+    failure?.kind === 'database'
+      ? 'Postgres reported an initialization failure. Retry after resolving the persisted error below.'
+      : 'The backend may still be provisioning this project. Checking again is safe and will not start a duplicate worker.';
 
   return (
     <div className="p-8">
@@ -69,16 +144,19 @@ export function NotProvisioned({ projectRef, initStatus }: NotProvisionedProps) 
           {failed ? (
             <>
               <CloudOff className="h-8 w-8 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Database provisioning failed</h2>
+              <h2 className="text-lg font-semibold">{failureTitle}</h2>
               <p className="max-w-md text-sm text-muted-foreground">
                 This project is in state{' '}
-                <code className="font-mono text-xs">{initStatus ?? 'unknown'}</code>. The underlying Postgres
-                database couldn&apos;t be initialised.
+                <code className="font-mono text-xs">{currentStatus}</code>.{' '}
+                {failureDescription}
               </p>
-              <p className="max-w-md text-xs text-destructive">{error}</p>
+              <p className="max-w-md text-xs text-destructive">
+                {failure?.message}
+              </p>
               <div className="flex gap-2 pt-2">
                 <Button size="sm" onClick={provision} disabled={running}>
-                  <Zap className="h-3.5 w-3.5" /> Retry
+                  <Zap className="h-3.5 w-3.5" />
+                  {failure?.kind === 'database' ? 'Retry' : 'Check status'}
                 </Button>
                 <Link href={`/project/${resolvedProjectRef}/settings`}>
                   <Button variant="outline" size="sm">
@@ -92,9 +170,11 @@ export function NotProvisioned({ projectRef, initStatus }: NotProvisionedProps) 
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               <h2 className="text-lg font-semibold">Initializing database…</h2>
               <p className="max-w-md text-sm text-muted-foreground">
-                Provisioning the Postgres database and running the auth/storage schema for{' '}
-                <code className="font-mono text-xs">{resolvedProjectRef}</code>. This takes ~30 seconds — the
-                Database, Auth and Storage pages will populate automatically once it&apos;s done.
+                Provisioning the Postgres database and running the auth/storage
+                schema for{' '}
+                <code className="font-mono text-xs">{resolvedProjectRef}</code>.
+                This can take a few minutes — the Database, Auth and Storage
+                pages will populate automatically once it&apos;s done.
               </p>
             </>
           )}
@@ -112,7 +192,10 @@ interface ProjectSummary {
   apikey?: string | null;
 }
 
-async function fetchProject(platformKey: string, projectRef: string): Promise<ProjectContext | null> {
+async function fetchProject(
+  platformKey: string,
+  projectRef: string,
+): Promise<ProjectContext | null> {
   const projects = await fetchAllProjects<ProjectSummary>(platformKey);
   const project = projects.find((p) => p.ref === projectRef);
   if (!project) return null;

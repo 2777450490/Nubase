@@ -27,6 +27,8 @@ import ai.nubase.auth.dto.response.admin.PlatformUserResponse;
 import ai.nubase.auth.dto.response.admin.ProjectKeysResponse;
 import ai.nubase.auth.dto.response.admin.ProjectListResponse;
 import ai.nubase.auth.dto.response.admin.ProjectMemberResponse;
+import ai.nubase.auth.dto.response.admin.ProjectProvisioningDtos.StatusResponse;
+import ai.nubase.auth.dto.response.admin.ProjectProvisioningDtos.SubmissionResponse;
 import ai.nubase.auth.dto.response.admin.ProjectSummaryResponse;
 import ai.nubase.auth.dto.response.admin.SqlHistoryEntry;
 import ai.nubase.auth.dto.response.admin.SqlSnippetResponse;
@@ -54,6 +56,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -73,6 +76,7 @@ public class AdminController {
     private final SqlExecutionService sqlExecutionService;
     private final SchemaInitService schemaInitService;
     private final DatabaseInitService databaseInitService;
+    private final ProjectProvisioningService projectProvisioningService;
     private final SchemaDdlExportService schemaDdlExportService;
     private final RlsPolicyExportService rlsPolicyExportService;
     private final ai.nubase.postgrest.multidb.DatabaseConfigRepository databaseConfigRepository;
@@ -644,9 +648,9 @@ public class AdminController {
     /**
      * POST /auth/v1/admin/projects/{ref}/provision
      *
-     * Drive phase 2 of project initialisation for a config that is currently in
-     * PENDING_INIT / INIT_FAILED. Authenticated via AdminInitAuthFilter (platform JWT
-     * or metadata service-role-key). Access rules:
+     * Queue phase 2 of project initialisation for a config that is currently in
+     * PENDING_INIT / INIT_FAILED, then return immediately. Authenticated via
+     * AdminInitAuthFilter (platform JWT or metadata service-role-key). Access rules:
      *   - metadata key → allowed
      *   - super_admin → allowed
      *   - regular user → must own the project (via platform_user_projects)
@@ -670,16 +674,61 @@ public class AdminController {
             }
         }
 
-        log.info("Provisioning project ref={} (dbKey={})", ref, config.getDbKey());
-        InitDatabaseResponse response = databaseInitService.initializePhysicalDatabase(config.getDbKey());
+        log.info("Submitting project provisioning ref={} (dbKey={})", ref, config.getDbKey());
+        ProjectProvisioningService.Submission submission;
+        try {
+            submission = projectProvisioningService.submit(
+                    config.getDbKey(),
+                    config.getInitStatus(),
+                    platformUserId);
+        } catch (TaskRejectedException e) {
+            log.warn("Project provisioning executor is saturated for ref={}", ref);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "provisioning_queue_full"));
+        }
 
-        // Make sure the caller (if a platform user) is recorded as the owner of the freshly
-        // provisioned project, since pre-existing PENDING_INIT projects predate ownership tracking.
-        if (response.isSuccess()) {
-            recordProjectOwnership(request, config.getDbKey());
+        SubmissionResponse response = new SubmissionResponse(
+                ref,
+                config.getInitStatus(),
+                submission.state().name(),
+                provisioningSubmissionMessage(submission.state()));
+        if (submission.state() == ProjectProvisioningService.SubmissionState.ALREADY_INITIALIZED) {
             return ResponseEntity.ok(response);
         }
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+        return ResponseEntity.accepted().body(response);
+    }
+
+    /**
+     * GET /auth/v1/admin/projects/{ref}/provision
+     *
+     * Return the persisted provisioning state without exposing database credentials.
+     */
+    @GetMapping("/admin/projects/{ref}/provision")
+    public ResponseEntity<?> getProjectProvisioningStatus(
+            @PathVariable("ref") String ref,
+            HttpServletRequest request) {
+        DatabaseConfig config = databaseConfigRepository.findByAppCode(ref);
+        if (config == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "project_not_found", "ref", ref));
+        }
+
+        UUID platformUserId = (UUID) request.getAttribute("platformUserId");
+        if (!isSuperAdmin(request)
+                && !platformUserProjectRepository.existsByUserIdAndDbKey(
+                        platformUserId, config.getDbKey())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "not_project_member"));
+        }
+
+        return ResponseEntity.ok(new StatusResponse(
+                ref,
+                config.getInitStatus(),
+                config.getInitMessage(),
+                config.getEnabled(),
+                projectProvisioningService.isRunning(config.getDbKey()),
+                config.getInitStartedAt(),
+                config.getInitCompletedAt()));
     }
 
     // ==================== Project Members ====================
@@ -1179,6 +1228,15 @@ public class AdminController {
             log.warn("Ownership/identity write raced for db_key={}; retrying once: {}", dbKey, race.getMessage());
             projectOwnershipService.recordOwnership(caller, dbKey, externalPlatform, externalUserId);
         }
+    }
+
+    private static String provisioningSubmissionMessage(
+            ProjectProvisioningService.SubmissionState state) {
+        return switch (state) {
+            case QUEUED -> "Project provisioning queued";
+            case ALREADY_RUNNING -> "Project provisioning is already running";
+            case ALREADY_INITIALIZED -> "Project is already initialized";
+        };
     }
 
     private static boolean hasText(String s) {

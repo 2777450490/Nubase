@@ -1,9 +1,9 @@
 # gitleaks config for Nubase — https://github.com/gitleaks/gitleaks
-# Run locally:  bash script/check-secrets.sh   (or: gitleaks detect -v)
+# Run locally:  bash script/check-secrets.sh
 # CI:           .github/workflows/secret-scan.yml
 #
 # This extends gitleaks' built-in rule set and only allowlists values that are
-# provably NOT real secrets (test fixtures, placeholder examples, lockfiles).
+# provably NOT real secrets in the exact commits and files where they originated.
 # Keep this list tight — every entry is a place a real secret could hide.
 
 title = "Nubase secret-scan config"
@@ -11,27 +11,38 @@ title = "Nubase secret-scan config"
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Test fixtures, *.example placeholders, and lockfiles — verified non-secret"
+[[allowlists]]
+description = "Synthetic API key used to test upload blocking"
+targetRules = ["generic-api-key"]
+condition = "AND"
+commits = ["82039c9a4ff89c9e8d8b27ca68ff82f85a7b3faa"]
+paths = ['''^frontend/packages/mcp-bridge/test/deploy-app\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^sk-123456789012345678901234567890$''']
 
-paths = [
-  '''\.example$''',                 # *.example files are placeholder templates
-  '''(^|/)pnpm-lock\.yaml$''',
-  '''(^|/)package-lock\.json$''',
-  '''(^|/)yarn\.lock$''',
-  # Specific test files whose fixtures gitleaks flags (audited: all fake):
-  #  - functions.test.ts  : fake PEM whose body is the literal word "secret"
-  #  - deploy-app.test.ts : "sk-1234…" string that EXISTS to test the upload
-  #                         security scanner that blocks key-like content
-  #  - JwtServiceTest.java : an obvious HS256 unit-test signing secret
-  '''frontend/packages/mcp-bridge/test/functions\.test\.ts$''',
-  '''frontend/packages/mcp-bridge/test/deploy-app\.test\.ts$''',
-  '''src/test/java/ai/nubase/postgrest/auth/JwtServiceTest\.java$''',
-]
+[[allowlists]]
+description = "Synthetic private key used to test upload blocking"
+targetRules = ["private-key"]
+condition = "AND"
+commits = ["82039c9a4ff89c9e8d8b27ca68ff82f85a7b3faa"]
+paths = ['''^frontend/packages/mcp-bridge/test/functions\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''-----BEGIN PRIVATE KEY-----\\nsecret\\n-----END PRIVATE KEY-----''']
 
-regexes = [
-  '''sk-123456789012345678901234567890''',                 # fake key in deploy-app.test
-  '''test-secret-key-that-is-long-enough-for-hs256''',     # fake HS256 secret in JwtServiceTest
-  '''REPLACE_ME''',                                        # nubase.env.example placeholder
-  '''replace-me-with-a-real-jwt-signed-by-master-key''',   # application.yml placeholder default
-]
+[[allowlists]]
+description = "Synthetic HS256 signing secret used by JwtServiceTest"
+targetRules = ["generic-api-key"]
+condition = "AND"
+commits = ["e4a3205b7434c078c4ea11fbc20e7e4607572455"]
+paths = ['''^src/test/java/ai/nubase/postgrest/auth/JwtServiceTest\.java$''']
+regexTarget = "secret"
+regexes = ['''^test-secret-key-that-is-long-enough-for-hs256$''']
+
+[[allowlists]]
+description = "Synthetic JWT signing secret in the historical tenancy test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+commits = ["a0be999d32fe1f7a13d8fcb263614f8d72699a85"]
+paths = ['''^src/test/java/ai/nubase/common/multitenancy/UnifiedMultiTenancyFilterTest\.java$''']
+regexTarget = "secret"
+regexes = ['''^0123456789abcdef0123456789abcdef$''']

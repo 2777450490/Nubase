@@ -16,21 +16,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG=".gitleaks.toml"
 MODE="${1:-}"
+GITLEAKS_VERSION="8.30.1"
 
-GITLEAKS_ARGS=(detect --source . --config "$CONFIG" --redact -v)
-if [[ "$MODE" == "--staged" ]]; then
-  GITLEAKS_ARGS+=(--staged)
-  echo "🔍 Scanning STAGED changes for secrets…"
-else
-  echo "🔍 Scanning full git history for secrets…"
-fi
+case "$MODE" in
+  "")
+    GITLEAKS_ARGS=(git --config "$CONFIG" --redact --verbose .)
+    echo "🔍 Scanning full git history for secrets…"
+    ;;
+  --staged)
+    GITLEAKS_ARGS=(git --staged --config "$CONFIG" --redact --verbose .)
+    echo "🔍 Scanning STAGED changes for secrets…"
+    ;;
+  *)
+    echo "Usage: bash script/check-secrets.sh [--staged]" >&2
+    exit 2
+    ;;
+esac
 
 run() {
   if command -v gitleaks >/dev/null 2>&1; then
     gitleaks "${GITLEAKS_ARGS[@]}"
   elif command -v docker >/dev/null 2>&1; then
-    echo "(gitleaks not installed — using zricethezav/gitleaks Docker image)"
-    docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest "${GITLEAKS_ARGS[@]}"
+    echo "(gitleaks not installed — using zricethezav/gitleaks:v${GITLEAKS_VERSION})"
+    docker run --rm -v "$PWD:/repo" -w /repo "zricethezav/gitleaks:v${GITLEAKS_VERSION}" "${GITLEAKS_ARGS[@]}"
   else
     echo "❌ Neither gitleaks nor docker is installed."
     echo "   Install:  brew install gitleaks   (or see https://github.com/gitleaks/gitleaks)"
@@ -39,11 +47,16 @@ run() {
 }
 
 if run; then
-  echo "✅ No secrets found — safe to publish."
+  echo "✅ No secrets found in the scanned scope."
 else
+  scan_status=$?
   echo ""
-  echo "❌ Potential secret(s) detected above. Do NOT publish until resolved."
-  echo "   • If it's a real secret: remove it, rotate it, and rewrite history if already committed."
-  echo "   • If it's a verified false positive (test fixture/placeholder): add an allowlist entry to $CONFIG."
-  exit 1
+  if [[ "$scan_status" -eq 1 ]]; then
+    echo "❌ Potential secret(s) detected above. Do NOT publish until resolved."
+    echo "   • If it's a real secret: remove it, rotate it, and rewrite history if already committed."
+    echo "   • If it's a verified false positive (test fixture/placeholder): add a narrowly scoped allowlist entry to $CONFIG."
+  else
+    echo "❌ Secret scan failed before producing a trustworthy result (exit $scan_status)."
+  fi
+  exit "$scan_status"
 fi

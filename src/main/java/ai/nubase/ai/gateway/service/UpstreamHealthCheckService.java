@@ -10,6 +10,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import javax.net.ssl.SSLException;
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -231,8 +236,8 @@ public class UpstreamHealthCheckService {
      * @return 健康检查结果
      */
     public HealthCheckResult performHealthCheck(UpstreamConfig config) {
-        log.debug("🏥 正在检查上游 '{}' (provider={}, baseUrl={})",
-                config.getName(), config.getProvider(), config.getBaseUrl());
+        log.debug("🏥 正在检查上游 '{}' (provider={})",
+                config.getName(), config.getProvider());
 
         long startTime = System.currentTimeMillis();
 
@@ -243,27 +248,27 @@ public class UpstreamHealthCheckService {
             for (HealthCheckProbe probe : probes) {
                 try (Response response = HEALTH_CHECK_CLIENT.newCall(probe.request()).execute()) {
                     long responseTime = System.currentTimeMillis() - startTime;
-                    String responseBody = response.body() != null ? response.body().string() : "";
 
                     if (response.isSuccessful()) {
-                        String message = String.format("%s: HTTP %d - API 可用（响应时间: %dms）",
+                        String message = String.format("%s: HTTP %d (responseTimeMs=%d)",
                                 probe.name(), response.code(), responseTime);
 //                        log.info("🏥 ✅ 上游 '{}' 健康 [{}] (HTTP {}, {}ms)",
 //                                config.getName(), probe.name(), response.code(), responseTime);
                         return new HealthCheckResult(true, message, responseTime);
                     }
 
-                    String message = String.format("%s: HTTP %d - API 不可用（响应时间: %dms，响应: %s）",
-                            probe.name(), response.code(), responseTime, truncate(responseBody, 200));
-                    log.warn("🏥 ❌ 上游 '{}' 探活失败 [{}] (HTTP {}, {}ms): {}",
-                            config.getName(), probe.name(), response.code(), responseTime, truncate(responseBody, 200));
+                    String message = String.format("%s: HTTP %d (responseTimeMs=%d)",
+                            probe.name(), response.code(), responseTime);
+                    log.warn("🏥 ❌ 上游 '{}' 探活失败 [{}] (HTTP {}, {}ms)",
+                            config.getName(), probe.name(), response.code(), responseTime);
                     failureMessages.add(message);
                 } catch (Exception e) {
                     long responseTime = System.currentTimeMillis() - startTime;
-                    String message = String.format("%s: %s: %s",
-                            probe.name(), e.getClass().getSimpleName(), e.getMessage());
+                    String failureCategory = classifyFailure(e);
+                    String message = String.format("%s: %s (responseTimeMs=%d)",
+                            probe.name(), failureCategory, responseTime);
                     log.warn("🏥 ❌ 上游 '{}' 探活异常 [{}] ({}ms): {}",
-                            config.getName(), probe.name(), responseTime, message);
+                            config.getName(), probe.name(), responseTime, failureCategory);
                     failureMessages.add(message);
                 }
             }
@@ -275,10 +280,10 @@ public class UpstreamHealthCheckService {
             return new HealthCheckResult(false, message, responseTime);
         } catch (Exception e) {
             long responseTime = System.currentTimeMillis() - startTime;
-            String errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            String errorMessage = classifyFailure(e) + " (responseTimeMs=" + responseTime + ")";
 
             log.warn("🏥 ❌ 上游 '{}' 不健康: {} ({}ms)",
-                    config.getName(), errorMessage, responseTime);
+                    config.getName(), classifyFailure(e), responseTime);
             return new HealthCheckResult(false, errorMessage, responseTime);
         }
     }
@@ -351,14 +356,23 @@ public class UpstreamHealthCheckService {
         );
     }
 
-    /**
-     * Truncate a string to the given max length, appending "..." if truncated.
-     */
-    private String truncate(String text, int maxLength) {
-        if (text == null) {
-            return "";
+    private String classifyFailure(Exception error) {
+        if (error instanceof SocketTimeoutException) {
+            return "TIMEOUT";
         }
-        return text.length() <= maxLength ? text : text.substring(0, maxLength) + "...";
+        if (error instanceof SSLException) {
+            return "TLS_FAILURE";
+        }
+        if (error instanceof ConnectException || error instanceof UnknownHostException) {
+            return "CONNECTION_FAILURE";
+        }
+        if (error instanceof IOException) {
+            return "IO_FAILURE";
+        }
+        if (error instanceof IllegalArgumentException) {
+            return "INVALID_CONFIGURATION";
+        }
+        return "HEALTH_CHECK_FAILURE";
     }
 
     /**
@@ -398,7 +412,7 @@ public class UpstreamHealthCheckService {
             }
         } catch (Exception e) {
             log.error("🏥 更新上游 '{}' 健康状态失败: {}",
-                    config.getName(), e.getMessage(), e);
+                    config.getName(), e.getClass().getSimpleName());
         }
     }
 

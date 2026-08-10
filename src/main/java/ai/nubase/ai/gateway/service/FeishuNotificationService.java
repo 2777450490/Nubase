@@ -55,9 +55,7 @@ public class FeishuNotificationService {
         List<Map<String, Object>> fields = List.of(
                 buildField("Provider", config.getProvider().name()),
                 buildField("上游名称", config.getName()),
-                buildField("Base URL", config.getBaseUrl()),
-                buildField("API Key", config.getAuthToken()),
-                buildField("错误信息", errorMessage),
+                buildField("Status", "UNHEALTHY"),
                 buildField("检测时间", LocalDateTime.now().format(FORMATTER))
         );
 
@@ -81,8 +79,7 @@ public class FeishuNotificationService {
         List<Map<String, Object>> fields = List.of(
                 buildField("Provider", config.getProvider().name()),
                 buildField("上游名称", config.getName()),
-                buildField("Base URL", config.getBaseUrl()),
-                buildField("API Key", config.getAuthToken()),
+                buildField("Status", "HEALTHY"),
                 buildField("恢复时间", LocalDateTime.now().format(FORMATTER))
         );
 
@@ -107,8 +104,7 @@ public class FeishuNotificationService {
 
         List<Map<String, Object>> fields = List.of(
                 buildField("服务名称", serviceName),
-                buildField("Base URL", baseUrl),
-                buildField("错误信息", errorMessage),
+                buildField("Status", "UNHEALTHY"),
                 buildField("检测时间", LocalDateTime.now().format(FORMATTER))
         );
 
@@ -132,7 +128,7 @@ public class FeishuNotificationService {
 
         List<Map<String, Object>> fields = List.of(
                 buildField("服务名称", serviceName),
-                buildField("Base URL", baseUrl),
+                buildField("Status", "HEALTHY"),
                 buildField("恢复时间", LocalDateTime.now().format(FORMATTER))
         );
 
@@ -154,12 +150,10 @@ public class FeishuNotificationService {
         String color = "red";
 
         List<Map<String, Object>> fields = List.of(
-                buildField("Request ID", safeValue(requestId)),
+                buildField("Request ID", safeIdentifier(requestId)),
                 buildField("Failure Record ID", failureRecordId == null ? "N/A" : String.valueOf(failureRecordId)),
-                buildField("User ID", safeValue(userId)),
                 buildField("Upstream Status", upstreamStatusCode == null ? "N/A" : String.valueOf(upstreamStatusCode)),
-                buildField("Error", safeValue(errorMessage)),
-                buildField("Request Preview", truncate(safeValue(requestPayload), 500)),
+                buildField("Failure", summarizeMem0Failure(upstreamStatusCode)),
                 buildField("Detected At", LocalDateTime.now().format(FORMATTER))
         );
 
@@ -215,24 +209,32 @@ public class FeishuNotificationService {
                 if (response.isSuccessful()) {
                     log.info("\uD83D\uDCE8 飞书通知发送成功: {}", title);
                 } else {
-                    log.warn("\uD83D\uDCE8 飞书通知发送失败: HTTP {}, body={}",
-                            response.code(),
-                            response.body() != null ? response.body().string() : "null");
+                    log.warn("\uD83D\uDCE8 飞书通知发送失败: HTTP {}", response.code());
                 }
             }
         } catch (Exception e) {
-            log.error("\uD83D\uDCE8 飞书通知发送异常: {}", e.getMessage(), e);
+            log.error("\uD83D\uDCE8 飞书通知发送异常: {}", e.getClass().getSimpleName());
         }
     }
 
-    private String safeValue(String value) {
-        return value == null || value.isBlank() ? "N/A" : value;
+    private String safeIdentifier(String value) {
+        if (value == null || value.isBlank()) {
+            return "N/A";
+        }
+        String normalized = value.replaceAll("[^A-Za-z0-9._:-]", "_");
+        return normalized.length() <= 128 ? normalized : normalized.substring(0, 128);
     }
 
-    private String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) {
-            return value;
+    private String summarizeMem0Failure(Integer upstreamStatusCode) {
+        if (upstreamStatusCode == null) {
+            return "Async write failed before receiving an upstream status";
         }
-        return value.substring(0, maxLength) + "...";
+        if (upstreamStatusCode >= 500) {
+            return "Upstream service error";
+        }
+        if (upstreamStatusCode >= 400) {
+            return "Upstream rejected the async write";
+        }
+        return "Async write failed";
     }
 }

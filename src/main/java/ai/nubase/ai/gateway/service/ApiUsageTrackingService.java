@@ -8,6 +8,7 @@ import ai.nubase.ai.gateway.entity.ApiUsageLog;
 import ai.nubase.ai.gateway.repository.ApiKeyRepository;
 import ai.nubase.ai.gateway.repository.ApiUsageLogRepository;
 import ai.nubase.ai.gateway.repository.DailyTokenUsageRepository;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +51,7 @@ public class ApiUsageTrackingService {
                 return buildClaudeTokenUsage(usage);
             }
         } catch (Exception e) {
-            log.warn("Failed to extract token usage from response: {}", e.getMessage());
+            log.warn("Failed to extract token usage from response: errorType={}", errorType(e));
         }
 
         return TokenUsage.empty();
@@ -68,7 +69,7 @@ public class ApiUsageTrackingService {
                 return buildClaudeTokenUsage(usage);
             }
         } catch (Exception e) {
-            log.debug("Not a usage event or failed to parse: {}", e.getMessage());
+            log.debug("Not a usage event or failed to parse: errorType={}", errorType(e));
         }
 
         return null;
@@ -120,7 +121,7 @@ public class ApiUsageTrackingService {
                 return jsonNode.get("model").asText();
             }
         } catch (Exception e) {
-            log.debug("Failed to extract model from request: {}", e.getMessage());
+            log.debug("Failed to extract model from request: errorType={}", errorType(e));
         }
         return "unknown";
     }
@@ -139,8 +140,8 @@ public class ApiUsageTrackingService {
             try {
                 billingService.recordUsage(record);
             } catch (Exception billingFailure) {
-                log.error("Central billing settlement failed for requestId={}: {}",
-                        record == null ? null : record.getRequestId(), billingFailure.getMessage(), billingFailure);
+                log.error("Central billing settlement failed for requestId={}, errorType={}",
+                        record == null ? null : record.getRequestId(), errorType(billingFailure));
             }
 
             String apiKey = record.getApiKey();
@@ -177,8 +178,13 @@ public class ApiUsageTrackingService {
             log.debug("Usage tracked successfully for API key: {}", maskApiKey(apiKey));
 
         } catch (Exception e) {
-            log.error("Failed to track API usage: {}", e.getMessage(), e);
+            log.error("Failed to track API usage for requestId={}, errorType={}",
+                    record == null ? null : record.getRequestId(), errorType(e));
         }
+    }
+
+    private static String errorType(Throwable error) {
+        return error == null ? "Unknown" : error.getClass().getSimpleName();
     }
 
     /**
@@ -303,12 +309,16 @@ public class ApiUsageTrackingService {
     public Map<String, Object> createRequestMetadata(String userAgent, Map<String, String> customHeaders) {
         Map<String, Object> metadata = new HashMap<>();
 
-        if (userAgent != null) {
-            metadata.put("user_agent", userAgent);
+        if (userAgent != null && !userAgent.isBlank()) {
+            metadata.put("user_agent", "[present]");
         }
 
         if (customHeaders != null && !customHeaders.isEmpty()) {
-            metadata.put("headers", customHeaders);
+            Map<String, String> sanitizedHeaders =
+                    SensitiveHeaderSanitizer.sanitizeForPersistence(customHeaders);
+            if (!sanitizedHeaders.isEmpty()) {
+                metadata.put("headers", sanitizedHeaders);
+            }
         }
 
         return metadata;

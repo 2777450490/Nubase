@@ -86,7 +86,8 @@ public class PlatformUsageTrackingService {
                     appCode, userId, source, record.getModel(), usage.getTotalTokens(), costUsd);
         } catch (Exception e) {
             // Never let platform bookkeeping break the request or the per-tenant tracking.
-            log.error("Failed to record platform usage: {}", e.getMessage(), e);
+            log.error("Failed to record platform usage: errorType={}",
+                    e.getClass().getSimpleName());
         }
     }
 

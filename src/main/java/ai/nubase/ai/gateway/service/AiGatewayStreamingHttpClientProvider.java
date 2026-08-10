@@ -138,10 +138,11 @@ public class AiGatewayStreamingHttpClientProvider {
                 return response;
             } catch (IOException exception) {
                 log.warn("AI gateway SSE call failed: requestId={}, protocol={}, upstream={}, authority={}, "
-                                + "durationMs={}, runningCalls={}, queuedCalls={}, error={}",
+                                + "durationMs={}, runningCalls={}, queuedCalls={}, errorType={}",
                         metadata.requestId(), metadata.protocol(), metadata.upstream(), metadata.authority(),
                         elapsedMillis(metadata.submittedAtNanos()),
-                        dispatcher.runningCallsCount(), dispatcher.queuedCallsCount(), exception.getMessage());
+                        dispatcher.runningCallsCount(), dispatcher.queuedCallsCount(),
+                        exception.getClass().getSimpleName());
                 throw exception;
             }
         }

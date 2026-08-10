@@ -97,7 +97,8 @@ public class OpenAIApiService {
                     config.getAuthToken(),
                     config.getTimeoutMs());
         } catch (Exception e) {
-            log.warn("Unable to get upstream config from database, using config file: {}", e.getMessage());
+            log.warn("Unable to get upstream config from database; using config file: errorType={}",
+                    errorType(e));
             return new UpstreamInfo(
                     "config-file",
                     openAIConfig.getBaseUrl(),
@@ -176,8 +177,8 @@ public class OpenAIApiService {
                     log.info("[upstream_error_transfer]✅ 故障转移成功，使用上游 '{}'", fallback.getName());
                     return result;
                 } catch (IOException failoverException) {
-                    log.warn("⚠️ 故障转移上游 '{}' 也失败了: {}",
-                            fallback.getName(), failoverException.getMessage());
+                    log.warn("Failover upstream '{}' failed: errorType={}",
+                            fallback.getName(), errorType(failoverException));
                     triedUpstreams.add(fallback.getName());
                 }
             }
@@ -200,13 +201,12 @@ public class OpenAIApiService {
         // 将 Claude 请求转换为 OpenAI 格式
         OpenAIRequest openAIRequest = claudeToOpenAIConverter.convertRequest(claudeRequestJson);
         String model = openAIRequest.getModel();
+        String openAIRequestJson = objectMapper.writeValueAsString(openAIRequest);
 
-        log.info("agent_log [{}] OpenAI POST /v1/chat/completions - 模型: {}, API Key: {}, 上游: {}",
-                requestId, model, maskApiKey(clientApiKey), upstream.name);
-        log.info("OpenAI request: {}", objectMapper.writeValueAsString(openAIRequest));
+        log.info("OpenAI-compatible request started: requestId={}, model={}, upstream={}, bodyBytes={}",
+                requestId, model, upstream.name, utf8Length(openAIRequestJson));
 
         // 构建 HTTP 请求
-        String openAIRequestJson = objectMapper.writeValueAsString(openAIRequest);
         Request.Builder requestBuilder = new Request.Builder()
                 .url(url)
                 .post(RequestBody.create(openAIRequestJson, MediaType.parse("application/json")))
@@ -250,18 +250,21 @@ public class OpenAIApiService {
                         continue; // Retry
                     } else {
                         // Last attempt failed
-                        log.error("❌ [{}] All {} OpenAI attempts failed with status {} - {}",
-                                requestId, maxAttempts, response.code(), responseBody);
+                        log.error("OpenAI-compatible request failed: requestId={}, attempts={}, status={}, "
+                                        + "requestBytes={}, responseBytes={}",
+                                requestId, maxAttempts, response.code(),
+                                utf8Length(openAIRequestJson), utf8Length(responseBody));
 
                         trackApiUsage(clientApiKey, requestId, model, "/v1/chat/completions", "POST",
-                                response.code(), null, duration, null, headers, "OpenAI API error: " + responseBody);
+                                response.code(), null, duration, null, headers,
+                                "OpenAI API error: status=" + response.code());
 
                         requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
                                 "/v1/chat/completions", model, headers, claudeRequestJson,
                                 response.code(), responseBody, duration, TokenUsage.empty(),
                                 "OpenAI API error");
 
-                        throw new IOException("OpenAI API request failed: " + response.code() + " - " + responseBody);
+                        throw new IOException("OpenAI API request failed with status " + response.code());
                     }
                 }
 
@@ -274,12 +277,12 @@ public class OpenAIApiService {
                 // Extract token usage
                 TokenUsage tokenUsage = openAIToClaudeConverter.convertUsage(openAIResponse.getUsage());
                 logOpenAIUsageDiagnostics("non_stream_response", requestId, "/v1/chat/completions", model,
-                        upstream.name, responseBody, tokenUsage);
+                        upstream.name, tokenUsage);
 
-                openAIResponseLog.info("📥 [{}] Response: {} - Duration: {} ms, Tokens: {}/{}/{}",
+                openAIResponseLog.info("📥 [{}] Response: {} - Duration: {} ms, Tokens: {}/{}/{}, bodyBytes={}",
                         requestId, response.code(), duration,
-                        tokenUsage.getInputTokens(), tokenUsage.getOutputTokens(), tokenUsage.getTotalTokens());
-                openAIResponseLog.info("Claude response: {}", claudeResponse);
+                        tokenUsage.getInputTokens(), tokenUsage.getOutputTokens(), tokenUsage.getTotalTokens(),
+                        utf8Length(claudeResponse));
 
                 // Track usage (非流式: TTFT = null)
                 trackApiUsage(clientApiKey, requestId, model, "/v1/chat/completions", "POST",
@@ -295,8 +298,9 @@ public class OpenAIApiService {
             } catch (IOException e) {
                 lastException = e;
                 if (attempt < maxAttempts) {
-                    log.warn("⚠️ [{}] OpenAI attempt {}/{} threw exception: {}, retrying after 3000ms...",
-                            requestId, attempt, maxAttempts, e.getMessage());
+                    log.warn("OpenAI-compatible request attempt failed: requestId={}, attempt={}/{}, "
+                                    + "errorType={}; retrying",
+                            requestId, attempt, maxAttempts, errorType(e));
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException ie) {
@@ -306,15 +310,16 @@ public class OpenAIApiService {
                 } else {
                     // Last attempt failed
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("❌ [{}] All {} OpenAI attempts failed with exception: {} - Duration: {} ms",
-                            requestId, maxAttempts, e.getMessage(), duration);
+                    log.error("OpenAI-compatible request exhausted attempts: requestId={}, attempts={}, "
+                                    + "errorType={}, durationMs={}",
+                            requestId, maxAttempts, errorType(e), duration);
 
                     trackApiUsage(clientApiKey, requestId, model, "/v1/chat/completions", "POST",
-                            500, null, duration, null, headers, e.getMessage());
+                            500, null, duration, null, headers, errorType(e));
 
                     requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
                             "/v1/chat/completions", model, headers, claudeRequestJson,
-                            500, null, duration, TokenUsage.empty(), e.getMessage());
+                            500, null, duration, TokenUsage.empty(), errorType(e));
 
                     throw e;
                 }
@@ -355,8 +360,8 @@ public class OpenAIApiService {
             // Ensure streaming is enabled
             openAIRequest.setStream(true);
 
-            log.info("🌊 [{}] OpenAI POST /v1/chat/completions (stream) - Model: {}, API Key: {}, Upstream: {}",
-                    requestId, model, maskApiKey(clientApiKey), upstream.name);
+            log.info("OpenAI-compatible streaming request started: requestId={}, model={}, upstream={}",
+                    requestId, model, upstream.name);
 
             String openAIRequestJson = objectMapper.writeValueAsString(openAIRequest);
 
@@ -423,7 +428,7 @@ public class OpenAIApiService {
                             TokenUsage usage = openAIToClaudeConverter.convertUsage(chunk.getUsage());
                             accumulatedUsage.set(usage);
                             logOpenAIUsageDiagnostics("stream_chunk", requestId, "/v1/chat/completions", model,
-                                    upstream.name, data, usage);
+                                    upstream.name, usage);
                             openAIResponseLog.info("📊 [{}] OpenAI stream usage chunk - Tokens: {}/{}/{}",
                                     requestId,
                                     usage.getInputTokens(),
@@ -448,7 +453,8 @@ public class OpenAIApiService {
                             completeStream(eventSource);
                         }
                     } catch (Exception e) {
-                        log.error("Error processing SSE event: {}", e.getMessage(), e);
+                        log.error("Error processing OpenAI SSE event: requestId={}, errorType={}",
+                                requestId, errorType(e));
                         streamCompleted = true;
                         emitter.completeWithError(e);
                         eventSource.cancel();
@@ -471,7 +477,7 @@ public class OpenAIApiService {
                     }
 
                     streamCompleted = true;
-                    String errorMsg = t != null ? t.getMessage() : "SSE connection closed unexpectedly";
+                    String errorMsg = t != null ? errorType(t) : "SSE connection closed unexpectedly";
                     log.error("❌ OpenAI SSE connection failed, Request ID: {}, Error: {}",
                             requestId, errorMsg);
 
@@ -482,7 +488,8 @@ public class OpenAIApiService {
                     if (response != null && response.body() != null) {
                         try {
                             errorBody = response.body().string();
-                            log.error("Error response: {} - {}", response.code(), errorBody);
+                            log.error("OpenAI SSE error response: requestId={}, status={}, responseBytes={}",
+                                    requestId, response.code(), utf8Length(errorBody));
 
                             // Send error event to client
                             String errorEvent = String.format(
@@ -490,7 +497,8 @@ public class OpenAIApiService {
                                     errorBody.replace("\"", "\\\""));
                             emitter.send(SseEmitter.event().name("error").data(errorEvent));
                         } catch (IOException e) {
-                            log.error("Unable to read or send error response: {}", e.getMessage());
+                            log.error("Unable to read or send OpenAI SSE error response: requestId={}, errorType={}",
+                                    requestId, errorType(e));
                         }
                     }
 
@@ -573,12 +581,13 @@ public class OpenAIApiService {
             });
 
             emitter.onError((e) -> {
-                log.error("❌ SSE emitter error, Request ID: {}, Error: {}", requestId, e.getMessage());
+                log.error("OpenAI SSE emitter error: requestId={}, errorType={}", requestId, errorType(e));
                 eventSource.cancel();
             });
 
         } catch (Exception e) {
-            log.error("Failed to initiate streaming request: {}", e.getMessage(), e);
+            log.error("Failed to initiate OpenAI streaming request: requestId={}, errorType={}",
+                    requestId, errorType(e));
             emitter.completeWithError(e);
         }
     }
@@ -615,7 +624,7 @@ public class OpenAIApiService {
             trackApiUsageWithTokenUsage(apiKey, requestId, model, endpoint, method, statusCode,
                     tokenUsage, durationMs, firstTokenLatencyMs, headers, errorMessage);
         } catch (Exception e) {
-            log.error("Failed to track API usage: {}", e.getMessage(), e);
+            log.error("Failed to track API usage: requestId={}, errorType={}", requestId, errorType(e));
         }
     }
 
@@ -653,15 +662,12 @@ public class OpenAIApiService {
 
             usageTrackingService.trackUsage(record);
         } catch (Exception e) {
-            log.error("Failed to track API usage: {}", e.getMessage(), e);
+            log.error("Failed to track API usage: requestId={}, errorType={}", requestId, errorType(e));
         }
     }
 
     private void logOpenAIUsageDiagnostics(String phase, String requestId, String endpoint, String model,
-                                           String upstream, String responseBody, TokenUsage tokenUsage) {
-        String usageJson = extractUsageJson(responseBody);
-        log.info("api_usage.openai_proxy.raw phase={} requestId={} endpoint={} model={} upstream={} usage={}",
-                phase, requestId, endpoint, model, upstream, usageJson);
+                                           String upstream, TokenUsage tokenUsage) {
         if (tokenUsage == null) {
             return;
         }
@@ -677,25 +683,6 @@ public class OpenAIApiService {
                 tokenUsage.getCacheCreationInputTokens(),
                 tokenUsage.getCacheReadInputTokens(),
                 empty);
-    }
-
-    private String extractUsageJson(String responseBody) {
-        if (responseBody == null || responseBody.isBlank()) {
-            return "<empty-body>";
-        }
-        try {
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(responseBody);
-            com.fasterxml.jackson.databind.JsonNode usage = root.get("usage");
-            if (usage == null || usage.isNull()) {
-                return "<missing-usage>";
-            }
-            String usageString = usage.toString();
-            return usageString.length() > 1000
-                    ? usageString.substring(0, 1000) + "...[+" + (usageString.length() - 1000) + "]"
-                    : usageString;
-        } catch (Exception e) {
-            return "<usage-parse-error:" + e.getMessage() + ">";
-        }
     }
 
     /**
@@ -718,9 +705,17 @@ public class OpenAIApiService {
                 return root.get("model").asText();
             }
         } catch (Exception e) {
-            log.debug("Unable to extract model from OpenAI-compatible request: {}", e.getMessage());
+            log.debug("Unable to extract model from OpenAI-compatible request: errorType={}", errorType(e));
         }
         return null;
+    }
+
+    static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static String errorType(Throwable throwable) {
+        return throwable == null ? "Unknown" : throwable.getClass().getSimpleName();
     }
 
 }

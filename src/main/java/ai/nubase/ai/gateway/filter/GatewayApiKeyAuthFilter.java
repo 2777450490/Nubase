@@ -147,7 +147,8 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
 
             filterChain.doFilter(request, response);
         } catch (Exception e) {
-            log.warn("Gateway data-plane auth failed for {}: {}", request.getRequestURI(), e.getMessage());
+            log.warn("Gateway data-plane auth failed for {}: errorType={}",
+                    request.getRequestURI(), errorType(e));
             unauthorized(response, "Gateway authentication error");
         } finally {
             SecurityContextHolder.clearContext();
@@ -209,13 +210,19 @@ public class GatewayApiKeyAuthFilter extends OncePerRequestFilter {
             authenticateUserJwt(request, userBearer);
             filterChain.doFilter(request, response);
         } catch (Exception e) {
-            log.warn("Project-user AI auth failed for {}: {}", request.getRequestURI(), e.getMessage());
+            log.warn("Project-user AI auth failed for {}: errorType={}",
+                    request.getRequestURI(), errorType(e));
             unauthorized(response, "Project-user authentication error");
         } finally {
             SecurityContextHolder.clearContext();
             MultiTenancyContext.clear();
             ai.nubase.ai.gateway.platform.GatewayRoutingContext.clear();
         }
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 
     private boolean validateKey(String key) {

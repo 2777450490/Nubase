@@ -4,6 +4,7 @@ import ai.nubase.ai.gateway.service.ClaudeGatewayService;
 import ai.nubase.ai.gateway.service.OpenAIApiService;
 import ai.nubase.ai.gateway.service.TokenCounterService;
 import ai.nubase.ai.gateway.util.GatewayKeyUtil;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import ai.nubase.common.enums.ApiProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -114,7 +115,8 @@ public class ClaudeGatewayController {
                                 headers, clientApiKey, upstreamName, emitter, provider);
                     }
                 } catch (Exception e) {
-                    log.error("Error initializing streaming request: {}", e.getMessage());
+                    log.error("Error initializing streaming request: model={}, provider={}, errorType={}",
+                            modelField, provider, errorType(e));
                     emitter.completeWithError(e);
                 }
 
@@ -133,13 +135,8 @@ public class ClaudeGatewayController {
                             headers, clientApiKey, upstreamName, provider);
                 }
 
-                log.info("========================================");
-                log.info("[api_response]:");
-                log.info("Model: {}", modelField != null ? modelField : "default");
-                log.info("Provider: {}", provider);
-                log.info("Response body: {}",
-                        response);
-                log.info("========================================");
+                log.info("Claude API response completed: model={}, provider={}, responseBytes={}",
+                        modelField != null ? modelField : "default", provider, utf8Length(response));
 
                 return ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_JSON)
@@ -147,10 +144,10 @@ public class ClaudeGatewayController {
             }
 
         } catch (IOException e) {
-            log.error("Error forwarding request: {}", e.getMessage());
+            log.error("Error forwarding Claude request: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"error\": \"Request forwarding failed: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Request forwarding failed\"}");
         }
     }
 
@@ -183,9 +180,9 @@ public class ClaudeGatewayController {
                     .body(responseJson);
 
         } catch (Exception e) {
-            log.error("计算 token 数量时出错: {}", e.getMessage(), e);
+            log.error("Token counting failed: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"计算 token 失败: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Token counting failed\"}");
         }
     }
 
@@ -210,9 +207,9 @@ public class ClaudeGatewayController {
                     .body(response);
 
         } catch (IOException e) {
-            log.error("Error fetching model info: {}", e.getMessage());
+            log.error("Error fetching model info: modelId={}, errorType={}", modelId, errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Failed to fetch model info: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Failed to fetch model info\"}");
         }
     }
 
@@ -235,9 +232,9 @@ public class ClaudeGatewayController {
                     .body(response);
 
         } catch (IOException e) {
-            log.error("Error listing models: {}", e.getMessage());
+            log.error("Error listing models: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Failed to list models: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Failed to list models\"}");
         }
     }
 
@@ -266,11 +263,11 @@ public class ClaudeGatewayController {
 
             return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(response);
         } catch (IOException e) {
-            log.error("File upload forwarding failed: {}", e.getMessage());
+            log.error("File upload forwarding failed: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"error\":{\"type\":\"upstream_error\",\"message\":\""
-                            + e.getMessage().replace("\"", "\\\"") + "\"}}");
+                    .body("{\"error\":{\"type\":\"upstream_error\","
+                            + "\"message\":\"File upload upstream request failed\"}}");
         }
     }
 
@@ -316,9 +313,9 @@ public class ClaudeGatewayController {
             try {
                 objectMapper.readTree(requestBody);
             } catch (IOException e) {
-                log.error("Invalid JSON in event logging request: {}", e.getMessage());
+                log.error("Invalid JSON in event logging request: errorType={}", errorType(e));
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .body("{\"error\": \"Invalid JSON format: " + e.getMessage() + "\"}");
+                        .body("{\"error\":\"Invalid JSON format\"}");
             }
 
             // Extract headers
@@ -334,13 +331,13 @@ public class ClaudeGatewayController {
                     .body(response);
 
         } catch (IOException e) {
-            log.error("Error forwarding event logging request to Claude API: {}", e.getMessage(), e);
+            log.error("Error forwarding event logging request to Claude API: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Failed to forward event logging request: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Failed to forward event logging request\"}");
         } catch (Exception e) {
-            log.error("Unexpected error processing event logging request: {}", e.getMessage(), e);
+            log.error("Unexpected error processing event logging request: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Internal server error: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Internal server error\"}");
         }
     }
 
@@ -385,7 +382,7 @@ public class ClaudeGatewayController {
                 JsonNode jsonNode = objectMapper.readTree(requestBody);
                 modelField = jsonNode.has("model") ? jsonNode.get("model").asText() : null;
             } catch (Exception e) {
-                log.debug("Unable to parse model from request body: {}", e.getMessage());
+                log.debug("Unable to parse model from request body: errorType={}", errorType(e));
             }
             ApiProvider provider = determineProviderFromModel(modelField);
 
@@ -411,9 +408,10 @@ public class ClaudeGatewayController {
                     .body(response);
 
         } catch (IOException e) {
-            log.error("Error proxying request: {}", e.getMessage());
+            log.error("Error proxying request: method={}, path={}, errorType={}",
+                    request.getMethod(), request.getRequestURI(), errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Failed to proxy request: " + e.getMessage() + "\"}");
+                    .body("{\"error\":\"Failed to proxy request\"}");
         }
     }
 
@@ -450,10 +448,11 @@ public class ClaudeGatewayController {
             String headerName = headerNames.nextElement();
 
             // Forward specific headers
-            if (headerName.equalsIgnoreCase("anthropic-version") ||
+            if (!SensitiveHeaderSanitizer.isSensitive(headerName)
+                    && (headerName.equalsIgnoreCase("anthropic-version") ||
                     headerName.equalsIgnoreCase("anthropic-beta") ||
-                    headerName.startsWith("x-") ||
-                    headerName.equalsIgnoreCase("user-agent")) {
+                    headerName.regionMatches(true, 0, "x-", 0, 2) ||
+                    headerName.equalsIgnoreCase("user-agent"))) {
 
                 headers.put(headerName, request.getHeader(headerName));
             }
@@ -520,7 +519,7 @@ public class ClaudeGatewayController {
                 JsonNode jsonNode = objectMapper.readTree(requestBody);
                 modelField = jsonNode.has("model") ? jsonNode.get("model").asText() : null;
             } catch (Exception e) {
-                log.debug("Unable to parse model from request body: {}", e.getMessage());
+                log.debug("Unable to parse model from request body: errorType={}", errorType(e));
             }
 
             ApiProvider provider = determineProviderFromModel(modelField);
@@ -543,7 +542,7 @@ public class ClaudeGatewayController {
                     upstreamName, emitter, provider);
 
         } catch (Exception e) {
-            log.error("初始化流式请求时出错: {}", e.getMessage());
+            log.error("Unable to initialize streaming request: errorType={}", errorType(e));
             emitter.completeWithError(e);
         }
 
@@ -588,7 +587,7 @@ public class ClaudeGatewayController {
 
             return requestBody;
         } catch (Exception e) {
-            log.warn("Failed to normalize model field, using original request body: {}", e.getMessage());
+            log.warn("Failed to normalize model field; using original request body: errorType={}", errorType(e));
             return requestBody;
         }
     }
@@ -635,8 +634,16 @@ public class ClaudeGatewayController {
 
             return modified ? objectMapper.writeValueAsString(root) : requestBody;
         } catch (Exception e) {
-            log.warn("Failed to sanitize thinking blocks: {}", e.getMessage());
+            log.warn("Failed to sanitize thinking blocks: errorType={}", errorType(e));
             return requestBody;
         }
+    }
+
+    private static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static String errorType(Throwable throwable) {
+        return throwable == null ? "Unknown" : throwable.getClass().getSimpleName();
     }
 }

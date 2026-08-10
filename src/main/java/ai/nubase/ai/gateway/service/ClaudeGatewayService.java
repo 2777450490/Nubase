@@ -6,6 +6,7 @@ import ai.nubase.ai.gateway.dto.TokenUsage;
 import ai.nubase.ai.gateway.platform.GatewayRoutingContext;
 import ai.nubase.ai.gateway.platform.PlatformUpstream;
 import ai.nubase.ai.gateway.platform.PlatformUpstreamService;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import ai.nubase.common.config.AnthropicConfig;
 import ai.nubase.common.util.ApiKeyLogMask;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,6 +41,26 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ClaudeGatewayService {
 
     private static final Logger claudeResponseLog = LoggerFactory.getLogger("ClaudeResponseLogger");
+    private static final Set<String> LOGGABLE_MESSAGE_ROLES = Set.of("user", "assistant");
+    private static final Set<String> LOGGABLE_CONTENT_BLOCK_TYPES = Set.of(
+            "text",
+            "tool_result",
+            "tool_use",
+            "image",
+            "document",
+            "thinking",
+            "redacted_thinking"
+    );
+    private static final Set<String> LOGGABLE_SSE_EVENT_TYPES = Set.of(
+            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
+            "message_delta",
+            "message_stop",
+            "ping",
+            "error"
+    );
 
     private final AnthropicConfig anthropicConfig;
     private final ObjectMapper objectMapper;
@@ -92,7 +113,8 @@ public class ClaudeGatewayService {
                     config.getTimeoutMs(),
                     config.getMaxInputTokens());
         } catch (Exception tenantMiss) {
-            log.info("项目无可用自定义上游，回退平台统一配置: {}", tenantMiss.getMessage());
+            log.info("项目无可用自定义上游，回退平台统一配置: exception={}",
+                    exceptionType(tenantMiss));
         }
 
         // 2) 回退平台统一配置（元数据库 public.ai_gateway_platform_upstreams）。
@@ -115,7 +137,7 @@ public class ClaudeGatewayService {
                         p.getMaxInputTokens());
             }
         } catch (Exception platformMiss) {
-            log.warn("平台统一上游解析失败: {}", platformMiss.getMessage());
+            log.warn("平台统一上游解析失败: exception={}", exceptionType(platformMiss));
         }
 
         // 3) 最后回退到环境默认配置（历史行为，视为平台来源）。
@@ -164,7 +186,7 @@ public class ClaudeGatewayService {
         long startTime = System.currentTimeMillis();
         String requestId = GatewayRequestContext.currentOrNewString();
 
-        log.info("📤 [{}] GET {} - API Key: {}", requestId, path, ApiKeyLogMask.mask(clientApiKey));
+        log.info("📤 [{}] GET {}", requestId, path);
 
         Request.Builder requestBuilder = new Request.Builder()
                 .url(url)
@@ -193,8 +215,9 @@ public class ClaudeGatewayService {
                 long duration = System.currentTimeMillis() - startTime;
                 String responseBody = response.body() != null ? response.body().string() : "{}";
 
-                claudeResponseLog.info("📥 [{}] 响应: {} - 耗时: {} ms", requestId, response.code(), duration);
-                claudeResponseLog.info("响应体: {}", responseBody);
+                claudeResponseLog.info(
+                        "claude.get.response requestId={} status={} durationMs={} bodyBytes={}",
+                        requestId, response.code(), duration, bodyBytes(responseBody));
 
                 if (!response.isSuccessful()) {
                     if (attempt < maxAttempts) {
@@ -209,17 +232,18 @@ public class ClaudeGatewayService {
                         continue; // Retry
                     } else {
                         // Last attempt failed
-                        log.error("❌ [{}] All {} attempts failed with status {} - {}",
-                                requestId, maxAttempts, response.code(), responseBody);
+                        String failureSummary = safeFailureSummary(response.code(), responseBody, null);
+                        log.error("claude.get.failed requestId={} attempts={} {}",
+                                requestId, maxAttempts, failureSummary);
 
                         trackApiUsage(clientApiKey, requestId, null, path, "GET",
-                                response.code(), responseBody, duration, headers, null);
+                                response.code(), responseBody, duration, headers, failureSummary);
 
                         requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "GET", path,
                                 null, headers, null, response.code(), responseBody, duration,
-                                TokenUsage.empty(), null);
+                                TokenUsage.empty(), failureSummary);
 
-                        throw new IOException("Claude API 请求失败: " + response.code() + " - " + responseBody);
+                        throw new IOException("Claude upstream request failed: " + failureSummary);
                     }
                 }
 
@@ -236,8 +260,8 @@ public class ClaudeGatewayService {
             } catch (IOException e) {
                 lastException = e;
                 if (attempt < maxAttempts) {
-                    log.warn("⚠️ [{}] Attempt {}/{} threw exception: {}, retrying after 3000ms...",
-                            requestId, attempt, maxAttempts, e.getMessage());
+                    log.warn("⚠️ [{}] Attempt {}/{} threw exception={}, retrying after 3000ms...",
+                            requestId, attempt, maxAttempts, exceptionType(e));
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException ie) {
@@ -247,15 +271,16 @@ public class ClaudeGatewayService {
                 } else {
                     // Last attempt failed
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("❌ [{}] All {} attempts failed with exception: {} - 耗时: {} ms",
-                            requestId, maxAttempts, e.getMessage(), duration);
+                    String failureSummary = safeFailureSummary(500, null, e);
+                    log.error("❌ [{}] All {} attempts failed: {} - 耗时: {} ms",
+                            requestId, maxAttempts, failureSummary, duration);
 
                     trackApiUsage(clientApiKey, requestId, null, path, "GET",
-                            500, null, duration, headers, e.getMessage());
+                            500, null, duration, headers, failureSummary);
 
                     requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "GET", path,
                             null, headers, null, 500, null, duration,
-                            TokenUsage.empty(), e.getMessage());
+                            TokenUsage.empty(), failureSummary);
 
                     throw e;
                 }
@@ -313,9 +338,9 @@ public class ClaudeGatewayService {
                 metadata.put("user_id", turnId);
 
                 requestBody = objectMapper.writeValueAsString(objectNode);
-                log.info("Added x-turn-id to metadata.user_id: {}", turnId);
+                log.info("Added x-turn-id to metadata.user_id for requestId={}", nonStreamRequestId);
             } catch (Exception e) {
-                log.warn("Failed to add x-turn-id to request metadata: {}", e.getMessage());
+                log.warn("Failed to add x-turn-id to request metadata: exception={}", exceptionType(e));
             }
         }
 
@@ -351,8 +376,8 @@ public class ClaudeGatewayService {
                     log.info("[upstream_error_transfer]✅ 故障转移成功，使用上游 '{}'", fallback.getName());
                     return result;
                 } catch (IOException failoverException) {
-                    log.warn("⚠️ 故障转移上游 '{}' 也失败了: {}",
-                            fallback.getName(), failoverException.getMessage());
+                    log.warn("⚠️ 故障转移上游 '{}' 也失败了: exception={}",
+                            fallback.getName(), exceptionType(failoverException));
                     triedUpstreams.add(fallback.getName());
                 }
             }
@@ -372,12 +397,11 @@ public class ClaudeGatewayService {
         long startTime = System.currentTimeMillis();
         String requestId = GatewayRequestContext.currentOrNewString();
 
-        log.info("agent_log [{}] POST {} - 模型: {}, API Key: {}, 上游: {}",
-                requestId, path, model, ApiKeyLogMask.mask(clientApiKey), upstream.name);
-        log.info("上游配置: baseUrl={}, timeout={}ms, maxInputTokens={}",
-                upstream.baseUrl, upstream.timeout, upstream.maxInputTokens);
-        String requestBodyLog = requestBody.length() > 200 ? requestBody.substring(0, 200) + "..." : requestBody;
-        log.info("请求体: {}", requestBodyLog);
+        log.info("agent_log [{}] POST {} - 模型: {}, 上游: {}",
+                requestId, path, model, upstream.name);
+        log.info("上游配置: name={}, timeout={}ms, maxInputTokens={}",
+                upstream.name, upstream.timeout, upstream.maxInputTokens);
+        log.info("agent_log.req_stats requestId={} {}", requestId, summarizeRequestBody(requestBody));
 
         Request.Builder requestBuilder = new Request.Builder()
                 .url(url)
@@ -421,9 +445,9 @@ public class ClaudeGatewayService {
                         tokenUsage.getInputTokens(), tokenUsage.getOutputTokens(), tokenUsage.getTotalTokens(),
                         upstream.name);
                 logClaudeUsageDiagnostics("non_stream_response", requestId, path, model, upstream.name,
-                        responseBody, tokenUsage);
-                claudeResponseLog.info("Response body: {}",
-                        responseBody);
+                        tokenUsage);
+                claudeResponseLog.info("claude.response_body_stats requestId={} bodyBytes={}",
+                        requestId, bodyBytes(responseBody));
                 claudeResponseLog.info("========================================");
 
                 if (!response.isSuccessful()) {
@@ -439,17 +463,18 @@ public class ClaudeGatewayService {
                         continue; // Retry
                     } else {
                         // Last attempt failed, track and throw
-                        log.error("❌ [{}] All {} attempts failed with status {} - {}",
-                                requestId, maxAttempts, response.code(), responseBody);
+                        String failureSummary = safeFailureSummary(response.code(), responseBody, null);
+                        log.error("❌ [{}] All {} attempts failed: {}",
+                                requestId, maxAttempts, failureSummary);
 
                         trackApiUsage(clientApiKey, requestId, model, path, "POST",
-                                response.code(), responseBody, duration, headers, null);
+                                response.code(), responseBody, duration, headers, failureSummary);
 
                         requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "POST", path,
                                 model, headers, requestBody, response.code(), responseBody, duration,
-                                tokenUsage, null);
+                                tokenUsage, failureSummary);
 
-                        throw new IOException("Claude API 请求失败: " + response.code() + " - " + responseBody);
+                        throw new IOException("Claude upstream request failed: " + failureSummary);
                     }
                 }
 
@@ -466,8 +491,8 @@ public class ClaudeGatewayService {
             } catch (IOException e) {
                 lastException = e;
                 if (attempt < maxAttempts) {
-                    log.warn("⚠️ [{}] Attempt {}/{} threw exception: {}, retrying after 3000ms...",
-                            requestId, attempt, maxAttempts, e.getMessage());
+                    log.warn("⚠️ [{}] Attempt {}/{} threw exception={}, retrying after 3000ms...",
+                            requestId, attempt, maxAttempts, exceptionType(e));
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException ie) {
@@ -477,15 +502,16 @@ public class ClaudeGatewayService {
                 } else {
                     // Last attempt failed
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("❌ [{}] All {} attempts failed with exception: {} - 耗时: {} ms, 上游: {}",
-                            requestId, maxAttempts, e.getMessage(), duration, upstream.name);
+                    String failureSummary = safeFailureSummary(500, null, e);
+                    log.error("❌ [{}] All {} attempts failed: {} - 耗时: {} ms, 上游: {}",
+                            requestId, maxAttempts, failureSummary, duration, upstream.name);
 
                     trackApiUsage(clientApiKey, requestId, model, path, "POST",
-                            500, null, duration, headers, e.getMessage());
+                            500, null, duration, headers, failureSummary);
 
                     requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "POST", path,
                             model, headers, requestBody, 500, null, duration,
-                            TokenUsage.empty(), e.getMessage());
+                            TokenUsage.empty(), failureSummary);
 
                     throw e;
                 }
@@ -515,13 +541,15 @@ public class ClaudeGatewayService {
         log.info("========================================");
         log.info("🔢 转发 Count Tokens 请求到 Claude API");
         log.info("请求ID: {}", requestId);
-        log.info("URL: {}", url);
-        log.info("客户端 API Key: {}", ApiKeyLogMask.mask(clientApiKey));
+        log.info("Endpoint: /v1/messages/count_tokens");
         if (headers != null && !headers.isEmpty()) {
-            log.info("请求头: {}", headers);
+            Map<String, String> sanitizedHeaders =
+                    SensitiveHeaderSanitizer.sanitizeForPersistence(headers);
+            if (!sanitizedHeaders.isEmpty()) {
+                log.info("count_tokens.request_headers requestId={} headers={}", requestId, sanitizedHeaders);
+            }
         }
-        String requestBodyLog = requestBody.length() > 200 ? requestBody.substring(0, 200) + "..." : requestBody;
-        log.info("请求体: {}", requestBodyLog);
+        log.info("count_tokens.req_stats requestId={} {}", requestId, summarizeRequestBody(requestBody));
         log.info("========================================");
 
         Request.Builder requestBuilder = new Request.Builder()
@@ -557,7 +585,7 @@ public class ClaudeGatewayService {
                 log.info("请求ID: {}", requestId);
                 log.info("状态码: {}", response.code());
                 log.info("耗时: {} ms", duration);
-                log.info("响应体: {}", responseBody);
+                log.info("响应体大小: {} bytes", bodyBytes(responseBody));
                 log.info("========================================");
 
                 if (!response.isSuccessful()) {
@@ -573,9 +601,10 @@ public class ClaudeGatewayService {
                         continue; // Retry
                     } else {
                         // Last attempt failed
-                        log.error("❌ [{}] All {} Count Tokens attempts failed with status {} - {}",
-                                requestId, maxAttempts, response.code(), responseBody);
-                        throw new IOException("Count Tokens 请求失败: " + response.code() + " - " + responseBody);
+                        String failureSummary = safeFailureSummary(response.code(), responseBody, null);
+                        log.error("❌ [{}] All {} Count Tokens attempts failed: {}",
+                                requestId, maxAttempts, failureSummary);
+                        throw new IOException("Count Tokens upstream request failed: " + failureSummary);
                     }
                 }
 
@@ -587,8 +616,8 @@ public class ClaudeGatewayService {
             } catch (IOException e) {
                 lastException = e;
                 if (attempt < maxAttempts) {
-                    log.warn("⚠️ [{}] Count Tokens attempt {}/{} threw exception: {}, retrying after 3000ms...",
-                            requestId, attempt, maxAttempts, e.getMessage());
+                    log.warn("⚠️ [{}] Count Tokens attempt {}/{} threw exception={}, retrying after 3000ms...",
+                            requestId, attempt, maxAttempts, exceptionType(e));
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException ie) {
@@ -598,8 +627,8 @@ public class ClaudeGatewayService {
                 } else {
                     // Last attempt failed
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("❌ [{}] All {} Count Tokens attempts failed: 耗时 {} ms, 错误: {}",
-                            requestId, maxAttempts, duration, e.getMessage());
+                    log.error("❌ [{}] All {} Count Tokens attempts failed: 耗时 {} ms, {}",
+                            requestId, maxAttempts, duration, safeFailureSummary(500, null, e));
                     throw e;
                 }
             }
@@ -623,8 +652,8 @@ public class ClaudeGatewayService {
         long startTime = System.currentTimeMillis();
         String requestId = GatewayRequestContext.currentOrNewString();
 
-        log.info("📤 [{}] POST {} (multipart) - filename={}, size={}, content-type={}, upstream={}",
-                requestId, path, file.getOriginalFilename(), file.getSize(), file.getContentType(),
+        log.info("📤 [{}] POST {} (multipart) - filenamePresent={}, size={}, content-type={}, upstream={}",
+                requestId, path, file.getOriginalFilename() != null, file.getSize(), file.getContentType(),
                 upstream.name);
 
         String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
@@ -663,10 +692,14 @@ public class ClaudeGatewayService {
 
             log.info("📥 [{}] {} - 耗时: {} ms", requestId, response.code(), duration);
 
+            String failureSummary = response.isSuccessful()
+                    ? null
+                    : safeFailureSummary(response.code(), responseBody, null);
+
             // 文件上传不消耗 token, 但仍记录调用以便审计
             trackApiUsage(clientApiKey, requestId, null, path, "POST",
                     response.code(), null, duration, headers,
-                    response.isSuccessful() ? null : responseBody);
+                    failureSummary);
 
             requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "POST", path,
                     null, headers,
@@ -674,10 +707,10 @@ public class ClaudeGatewayService {
                             + "\",\"size\":" + file.getSize() + "}",
                     response.code(), responseBody, duration,
                     TokenUsage.empty(),
-                    response.isSuccessful() ? null : responseBody);
+                    failureSummary);
 
             if (!response.isSuccessful()) {
-                throw new IOException("Claude Files upload 失败: " + response.code() + " - " + responseBody);
+                throw new IOException("Claude Files upload failed: " + failureSummary);
             }
 
             return responseBody;
@@ -724,13 +757,14 @@ public class ClaudeGatewayService {
 
             if (!response.isSuccessful()) {
                 String errorBody = body != null ? body.string() : "";
-                log.error("❌ [{}] download 失败: {} - {}", requestId, status, errorBody);
+                String failureSummary = safeFailureSummary(status, errorBody, null);
+                log.error("❌ [{}] download 失败: {}", requestId, failureSummary);
                 downstream.setContentType("application/json");
                 trackApiUsage(clientApiKey, requestId, null, path, "GET",
-                        status, null, duration, headers, errorBody);
+                        status, null, duration, headers, failureSummary);
                 requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "GET", path,
                         null, headers, null, status, errorBody, duration,
-                        TokenUsage.empty(), errorBody);
+                        TokenUsage.empty(), failureSummary);
                 downstream.getOutputStream().write(errorBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 return;
             }
@@ -842,15 +876,19 @@ public class ClaudeGatewayService {
             log.info("📥 [{}] {} {} - {} - 耗时: {} ms",
                     requestId, upperMethod, path, response.code(), duration);
 
+            String failureSummary = response.isSuccessful()
+                    ? null
+                    : safeFailureSummary(response.code(), responseBody, null);
+
             trackApiUsage(clientApiKey, requestId, null, path, upperMethod,
                     response.code(), null, duration, headers,
-                    response.isSuccessful() ? null : responseBody);
+                    failureSummary);
 
             requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), upperMethod, path,
                     null, headers, expectsBody ? requestBody : null,
                     response.code(), responseBody, duration,
                     TokenUsage.empty(),
-                    response.isSuccessful() ? null : responseBody);
+                    failureSummary);
 
             if (!response.isSuccessful()) {
                 throw new IOException("Claude API " + upperMethod + " " + path
@@ -893,7 +931,8 @@ public class ClaudeGatewayService {
         try (Response response = getHttpClient().newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "无错误详情";
-                log.error("事件日志请求失败: {} - {}", response.code(), errorBody);
+                String failureSummary = safeFailureSummary(response.code(), errorBody, null);
+                log.error("事件日志请求失败: {}", failureSummary);
 
                 // 事件日志失败 - 记录但不失败
                 if (response.code() >= 500) {
@@ -903,19 +942,18 @@ public class ClaudeGatewayService {
                     // 端点未找到 - 可能不支持
                     log.warn("事件日志端点未找到 - 功能可能不可用");
                 } else if (response.code() >= 400) {
-                    // 客户端错误 - 记录详细信息
-                    log.error("事件日志请求客户端错误: {}", errorBody);
+                    log.error("事件日志请求客户端错误: status={} bodyBytes={}",
+                            response.code(), bodyBytes(errorBody));
                 }
 
-                throw new IOException("事件日志请求失败: " + response.code() + " - " + errorBody);
+                throw new IOException("Event logging upstream request failed: " + failureSummary);
             }
 
             String responseBody = response.body() != null ? response.body().string() : "{}";
-            log.info("事件日志响应: {}", responseBody);
-            log.info("事件日志批次处理成功");
+            log.info("事件日志批次处理成功: bodyBytes={}", bodyBytes(responseBody));
             return responseBody;
         } catch (IOException e) {
-            log.error("事件日志请求过程中发生 IOException: {}", e.getMessage());
+            log.error("事件日志请求过程中发生 IOException: exception={}", exceptionType(e));
             throw e;
         }
     }
@@ -960,12 +998,10 @@ public class ClaudeGatewayService {
         String model = usageTrackingService.extractModelFromRequest(requestBody);
 
         log.info("========================================");
-        log.info("agent_log [{}] POST {} (stream) - 模型: {}, API Key: {}, 上游: {}",
-                requestId, path, model, ApiKeyLogMask.mask(clientApiKey), primaryUpstream.name);
-        log.info("上游配置: baseUrl={}, timeout={}ms, maxInputTokens={}",
-                primaryUpstream.baseUrl, primaryUpstream.timeout, primaryUpstream.maxInputTokens);
-        String requestBodyLog = requestBody.length() > 200 ? requestBody.substring(0, 200) + "..." : requestBody;
-        log.info("请求体: {}", requestBodyLog);
+        log.info("agent_log [{}] POST {} (stream) - 模型: {}, 上游: {}",
+                requestId, path, model, primaryUpstream.name);
+        log.info("上游配置: name={}, timeout={}ms, maxInputTokens={}",
+                primaryUpstream.name, primaryUpstream.timeout, primaryUpstream.maxInputTokens);
         final String requestStats = summarizeRequestBody(requestBody);
         log.info("agent_log.req_stats requestId={} {}", requestId, requestStats);
         log.info("========================================");
@@ -988,12 +1024,12 @@ public class ClaudeGatewayService {
                         ? (com.fasterxml.jackson.databind.node.ObjectNode) objectNode.get("metadata")
                         : objectNode.putObject("metadata");
                 metadata.put("user_id", turnId);
-                log.info("Added x-turn-id to metadata.user_id: {}", turnId);
+                log.info("Added x-turn-id to metadata.user_id for requestId={}", requestId);
             }
 
             streamingRequestBody = objectMapper.writeValueAsString(objectNode);
         } catch (Exception e) {
-            log.warn("无法解析请求体以添加 stream 标志或 metadata: {}", e.getMessage());
+            log.warn("无法解析请求体以添加 stream 标志或 metadata: exception={}", exceptionType(e));
         }
 
         final String preparedRequestBody = streamingRequestBody;
@@ -1004,12 +1040,8 @@ public class ClaudeGatewayService {
         final AtomicBoolean emitterCompleted = new AtomicBoolean(false);
         // TTFT: 第一次进入 onEvent 时刻 - startTime, 用 AtomicLong(0) 表示"还没收到首事件"
         final java.util.concurrent.atomic.AtomicLong firstEventAt = new java.util.concurrent.atomic.AtomicLong(0L);
-        // 诊断: 用于排查 "200 + 0 tokens" 异常 —— 统计事件类型 + 抓取关键事件原文
+        // Keep only fixed event categories for stream diagnostics.
         final Map<String, Integer> eventTypeCounts = new java.util.concurrent.ConcurrentHashMap<>();
-        final AtomicReference<String> lastMessageStartRaw = new AtomicReference<>();
-        final AtomicReference<String> lastMessageDeltaRaw = new AtomicReference<>();
-        final AtomicReference<String> firstEventRaw = new AtomicReference<>();
-        final AtomicReference<String> lastEventRaw = new AtomicReference<>();
 
         class StreamingAttemptRunner {
             void start(int attemptIndex) {
@@ -1035,7 +1067,7 @@ public class ClaudeGatewayService {
                                 requestId, response.code(), selectedUpstream.name);
                         log.info("upstream.response_headers requestId={} upstream={} status={} headers={}",
                                 requestId, selectedUpstream.name, response.code(),
-                                formatResponseHeaders(response.headers()));
+                                formatResponseHeadersForLogging(response.headers()));
                     }
 
                     @Override
@@ -1048,24 +1080,18 @@ public class ClaudeGatewayService {
                         // 首个事件抵达时刻 (compareAndSet 保证只赋一次)
                         firstEventAt.compareAndSet(0L, System.currentTimeMillis());
 
-                        // 诊断: 统计 + 抓取关键事件原文 (truncated)
-                        String typeKey = type == null || type.isEmpty() ? "<no-type>" : type;
+                        String typeKey = safeEventType(type);
                         eventTypeCounts.merge(typeKey, 1, Integer::sum);
-                        String truncated = data == null ? null
-                                : (data.length() > 800 ? data.substring(0, 800) + "...[+" + (data.length() - 800) + "]" : data);
-                        firstEventRaw.compareAndSet(null, truncated);
-                        lastEventRaw.set(truncated);
-                        if ("message_start".equals(type)) lastMessageStartRaw.set(truncated);
-                        if ("message_delta".equals(type)) lastMessageDeltaRaw.set(truncated);
 
                         try {
-                            claudeResponseLog.info("📨 [{}] SSE Event - type: {}, id: {}, data: {}",
-                                    requestId, type, id, data);
+                            claudeResponseLog.info(
+                                    "claude.sse_event requestId={} type={} dataBytes={}",
+                                    requestId, typeKey, bodyBytes(data));
 
                             TokenUsage eventUsage = usageTrackingService.extractTokenUsageFromStreamEvent(data);
                             if (eventUsage != null) {
-                                logClaudeUsageDiagnostics("stream_event", requestId, path, model, selectedUpstream.name,
-                                        data, eventUsage);
+                                logClaudeUsageDiagnostics(
+                                        "stream_event", requestId, path, model, selectedUpstream.name, eventUsage);
                                 TokenUsage current = accumulatedUsage.get();
                                 int inputTokens = Math.max(current.getInputTokens(), eventUsage.getInputTokens());
                                 int outputTokens = Math.max(current.getOutputTokens(), eventUsage.getOutputTokens());
@@ -1105,7 +1131,7 @@ public class ClaudeGatewayService {
                                 completeStream(eventSource);
                             }
                         } catch (IOException e) {
-                            log.error("Failed to send SSE event to client: {}", e.getMessage(), e);
+                            log.error("Failed to send SSE event to client: exception={}", exceptionType(e));
                             streamCompleted = true;
                             completeWithError(e);
                             eventSource.cancel();
@@ -1128,12 +1154,11 @@ public class ClaudeGatewayService {
                             return;
                         }
 
-                        // 诊断: 流没等到 stream-end 事件就被关闭, 但已有事件 —— 上游提前断流
+                        // Record only aggregate stream shape when the upstream closes early.
                         if (clientStreamStarted.get()) {
-                            log.warn("claude_stream.closed_without_stream_end requestId={} upstream={} model={} duration={}ms eventCount={} eventTypes={} reqStats=[{}] lastEvent={} lastMessageStart={} lastMessageDelta={} —— upstream 提前关闭, 未发 message_stop / message_delta(stop_reason)",
+                            log.warn("claude_stream.closed_without_stream_end requestId={} upstream={} model={} duration={}ms eventCount={} eventTypes={} reqStats=[{}]",
                                     requestId, selectedUpstream.name, model, duration,
-                                    totalEvents, eventTypeCounts, requestStats,
-                                    lastEventRaw.get(), lastMessageStartRaw.get(), lastMessageDeltaRaw.get());
+                                    totalEvents, eventTypeCounts, requestStats);
                         }
 
                         completeEmitter();
@@ -1146,20 +1171,17 @@ public class ClaudeGatewayService {
                         }
 
                         streamCompleted = true;
-                        String errorMsg = t != null ? t.getMessage() : "SSE connection closed unexpectedly";
                         int statusCode = response != null ? response.code() : 500;
                         String errorBody = readResponseBody(response);
+                        String failureSummary = safeFailureSummary(statusCode, errorBody, t);
 
-                        log.error("❌ SSE connection failed, requestId: {}, upstream: {}, status: {}, error: {}",
-                                requestId, selectedUpstream.name, statusCode, errorMsg);
-                        if (errorBody != null) {
-                            log.error("Error response from upstream '{}': {}", selectedUpstream.name, errorBody);
-                        }
+                        log.error("❌ SSE connection failed, requestId: {}, upstream: {}, {}",
+                                requestId, selectedUpstream.name, failureSummary);
 
-                        recordFailedAttempt(statusCode, errorBody, errorMsg);
+                        recordFailedAttempt(statusCode, errorBody, failureSummary);
 
                         if (!clientStreamStarted.get()
-                                && startNextIfAvailable(attemptIndex, selectedUpstream, errorMsg)) {
+                                && startNextIfAvailable(attemptIndex, selectedUpstream, failureSummary)) {
                             eventSource.cancel();
                             return;
                         }
@@ -1199,18 +1221,16 @@ public class ClaudeGatewayService {
                                     finalUsage.getCacheReadInputTokens());
                         }
 
-                        // 诊断: 200 OK 但 0 tokens 的异常 —— 此时倾向上游问题, 把上下文 dump 出来
+                        // Record only aggregate stream shape for zero-token diagnostics.
                         boolean usageEmpty = finalUsage.getInputTokens() == 0
                                 && finalUsage.getOutputTokens() == 0
                                 && finalUsage.getCacheCreationInputTokens() == 0
                                 && finalUsage.getCacheReadInputTokens() == 0;
                         if (usageEmpty) {
                             int totalEvents = eventTypeCounts.values().stream().mapToInt(Integer::intValue).sum();
-                            log.warn("api_usage.zero_tokens_on_claude_stream requestId={} upstream={} model={} path={} duration={}ms eventCount={} eventTypes={} reqStats=[{}] firstEvent={} lastEvent={} lastMessageStart={} lastMessageDelta={}",
+                            log.warn("api_usage.zero_tokens_on_claude_stream requestId={} upstream={} model={} path={} duration={}ms eventCount={} eventTypes={} reqStats=[{}]",
                                     requestId, selectedUpstream.name, model, path, duration,
-                                    totalEvents, eventTypeCounts, requestStats,
-                                    firstEventRaw.get(), lastEventRaw.get(),
-                                    lastMessageStartRaw.get(), lastMessageDeltaRaw.get());
+                                    totalEvents, eventTypeCounts, requestStats);
                         }
 
                         log.info("api_usage.claude_stream.final requestId={} endpoint={} model={} upstream={} tokens input={} output={} total={} cacheCreation={} cacheRead={}",
@@ -1236,15 +1256,15 @@ public class ClaudeGatewayService {
                         eventSource.cancel();
                     }
 
-                    private void recordFailedAttempt(int statusCode, String errorBody, String errorMsg) {
+                    private void recordFailedAttempt(int statusCode, String errorBody, String failureSummary) {
                         long duration = System.currentTimeMillis() - startTime;
                         runWithCapturedContext(capturedContext, capturedRouting, () ->
                                 trackApiUsage(clientApiKey, requestId, model, path, "POST",
-                                        statusCode, null, duration, headers, errorMsg));
+                                        statusCode, null, duration, headers, failureSummary));
 
                         requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "POST", path,
                                 model, headers, originalRequestBody, statusCode, errorBody, duration,
-                                TokenUsage.empty(), errorMsg);
+                                TokenUsage.empty(), failureSummary);
                     }
 
                     private String readResponseBody(Response response) {
@@ -1255,7 +1275,7 @@ public class ClaudeGatewayService {
                         try {
                             return response.body().string();
                         } catch (IOException e) {
-                            log.error("Unable to read error response: {}", e.getMessage());
+                            log.error("Unable to read error response: exception={}", exceptionType(e));
                             return null;
                         }
                     }
@@ -1273,7 +1293,7 @@ public class ClaudeGatewayService {
                                     .name("error")
                                     .data(errorEvent));
                         } catch (IOException e) {
-                            log.error("Unable to send error event: {}", e.getMessage());
+                            log.error("Unable to send error event: exception={}", exceptionType(e));
                         }
                     }
                 };
@@ -1334,13 +1354,14 @@ public class ClaudeGatewayService {
             log.warn("⏱️ SSE 发射器超时，请求ID: {}, 耗时: {} ms",
                     requestId, System.currentTimeMillis() - startTime);
             long duration = System.currentTimeMillis() - startTime;
+            String failureSummary = safeFailureSummary(408, null, null);
 
             trackApiUsage(clientApiKey, requestId, model, path, "POST",
-                    408, null, duration, headers, "请求超时");
+                    408, null, duration, headers, failureSummary);
 
             requestLogService.logRequest(requestId, ApiKeyLogMask.mask(clientApiKey), "POST", path,
                     model, headers, originalRequestBody, 408, null, duration,
-                    TokenUsage.empty(), "请求超时");
+                    TokenUsage.empty(), failureSummary);
 
             streamingAttemptRunner.cancelActiveEventSource();
             if (emitterCompleted.compareAndSet(false, true)) {
@@ -1355,11 +1376,12 @@ public class ClaudeGatewayService {
         });
 
         emitter.onError((e) -> {
-            log.error("❌ SSE 发射器错误，请求ID: {}, 错误: {}", requestId, e.getMessage());
+            String failureSummary = safeFailureSummary(500, null, e);
+            log.error("❌ SSE 发射器错误，请求ID: {}, {}", requestId, failureSummary);
             long duration = System.currentTimeMillis() - startTime;
 
             trackApiUsage(clientApiKey, requestId, model, path, "POST",
-                    500, null, duration, headers, "发射器错误: " + e.getMessage());
+                    500, null, duration, headers, failureSummary);
 
             emitterCompleted.set(true);
             streamingAttemptRunner.cancelActiveEventSource();
@@ -1386,8 +1408,8 @@ public class ClaudeGatewayService {
                         fallback.getMaxInputTokens()));
             }
         } catch (Exception e) {
-            log.warn("Unable to load streaming failover upstreams for provider {}: {}",
-                    provider, e.getMessage());
+            log.warn("Unable to load streaming failover upstreams for provider {}: exception={}",
+                    provider, exceptionType(e));
         }
 
         return upstreamAttempts;
@@ -1477,7 +1499,7 @@ public class ClaudeGatewayService {
 
             usageTrackingService.trackUsage(record);
         } catch (Exception e) {
-            log.error("跟踪 API 使用量失败: {}", e.getMessage(), e);
+            log.error("跟踪 API 使用量失败: exception={}", exceptionType(e));
         }
     }
 
@@ -1514,15 +1536,12 @@ public class ClaudeGatewayService {
 
             usageTrackingService.trackUsage(record);
         } catch (Exception e) {
-            log.error("跟踪 API 使用量失败: {}", e.getMessage(), e);
+            log.error("跟踪 API 使用量失败: exception={}", exceptionType(e));
         }
     }
 
     private void logClaudeUsageDiagnostics(String phase, String requestId, String endpoint, String model,
-                                           String upstream, String responseBody, TokenUsage tokenUsage) {
-        String usageJson = extractUsageJson(responseBody);
-        log.info("api_usage.claude.raw phase={} requestId={} endpoint={} model={} upstream={} usage={}",
-                phase, requestId, endpoint, model, upstream, usageJson);
+                                           String upstream, TokenUsage tokenUsage) {
         if (tokenUsage == null) {
             return;
         }
@@ -1540,29 +1559,28 @@ public class ClaudeGatewayService {
                 empty);
     }
 
-    private String extractUsageJson(String responseBody) {
-        if (responseBody == null || responseBody.isBlank()) {
-            return "<empty-body>";
+    static String safeFailureSummary(int statusCode, String responseBody, Throwable error) {
+        return "status=" + statusCode
+                + " exception=" + exceptionType(error)
+                + " bodyBytes=" + bodyBytes(responseBody);
+    }
+
+    static String safeEventType(String eventType) {
+        return eventType != null && LOGGABLE_SSE_EVENT_TYPES.contains(eventType)
+                ? eventType
+                : "other";
+    }
+
+    static int bodyBytes(String body) {
+        return body == null ? 0 : body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static String exceptionType(Throwable error) {
+        if (error == null) {
+            return "none";
         }
-        try {
-            JsonNode root = objectMapper.readTree(responseBody);
-            JsonNode usage = root.get("usage");
-            if (usage == null || usage.isNull()) {
-                JsonNode message = root.get("message");
-                if (message != null) {
-                    usage = message.get("usage");
-                }
-            }
-            if (usage == null || usage.isNull()) {
-                return "<missing-usage>";
-            }
-            String usageString = usage.toString();
-            return usageString.length() > 1000
-                    ? usageString.substring(0, 1000) + "...[+" + (usageString.length() - 1000) + "]"
-                    : usageString;
-        } catch (Exception e) {
-            return "<usage-parse-error:" + e.getMessage() + ">";
-        }
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? error.getClass().getName() : simpleName;
     }
 
     /**
@@ -1570,7 +1588,7 @@ public class ClaudeGatewayService {
      * 关注点：体积、消息数、role 分布、content block 类型分布、tool_result 大小、
      * 系统提示是否存在、按 chars/4 估算的输入 token。
      */
-    private String summarizeRequestBody(String requestBody) {
+    String summarizeRequestBody(String requestBody) {
         if (requestBody == null) {
             return "bodyBytes=0";
         }
@@ -1587,7 +1605,8 @@ public class ClaudeGatewayService {
             if (messages != null && messages.isArray()) {
                 messageCount = messages.size();
                 for (JsonNode msg : messages) {
-                    String role = msg.path("role").asText("?");
+                    String role = safeDiagnosticCategory(
+                            msg.path("role").asText(""), LOGGABLE_MESSAGE_ROLES);
                     roles.merge(role, 1, Integer::sum);
                     JsonNode content = msg.get("content");
                     if (content == null) continue;
@@ -1596,16 +1615,19 @@ public class ClaudeGatewayService {
                         totalTextBytes += content.asText().length();
                     } else if (content.isArray()) {
                         for (JsonNode block : content) {
-                            String type = block.path("type").asText("unknown");
-                            blocks.merge(type, 1, Integer::sum);
-                            if ("text".equals(type)) {
+                            String rawType = block.path("type").asText("");
+                            String safeType = safeDiagnosticCategory(
+                                    rawType,
+                                    LOGGABLE_CONTENT_BLOCK_TYPES);
+                            blocks.merge(safeType, 1, Integer::sum);
+                            if ("text".equals(rawType)) {
                                 totalTextBytes += block.path("text").asText("").length();
-                            } else if ("tool_result".equals(type)) {
+                            } else if ("tool_result".equals(rawType)) {
                                 JsonNode tc = block.get("content");
                                 int len = tc == null ? 0 : tc.toString().length();
                                 toolResultBytes += len;
                                 totalTextBytes += len;
-                            } else if ("tool_use".equals(type)) {
+                            } else if ("tool_use".equals(rawType)) {
                                 JsonNode input = block.get("input");
                                 if (input != null) totalTextBytes += input.toString().length();
                             }
@@ -1634,22 +1656,28 @@ public class ClaudeGatewayService {
                     "bodyBytes=%d messageCount=%d roles=%s contentBlocks=%s toolResultBytes=%d hasSystem=%s systemBytes=%d approxInputTokens=~%d",
                     bodyBytes, messageCount, roles, blocks, toolResultBytes, hasSystem, systemBytes, approxTokens);
         } catch (Exception e) {
-            return "stats_parse_failed=" + e.getMessage() + " bodyBytes=" + bodyBytes;
+            return "stats_parse_failed bodyBytes=" + bodyBytes;
         }
     }
 
+    private static String safeDiagnosticCategory(String value, Set<String> allowlist) {
+        return allowlist.contains(value) ? value : "other";
+    }
+
     /**
-     * 把 OkHttp 响应头格式化为单行 key=value, 便于日志检索。
-     * 上游中转服务常把诊断信息塞在自定义 header 里 (x-error / x-upstream-status / cf-ray 等)。
+     * Formats only explicitly approved upstream response headers for diagnostic logging.
      */
-    private String formatResponseHeaders(okhttp3.Headers headers) {
+    static String formatResponseHeadersForLogging(okhttp3.Headers headers) {
         if (headers == null || headers.size() == 0) return "{}";
-        StringBuilder sb = new StringBuilder("{");
+        StringJoiner values = new StringJoiner(", ", "{", "}");
         for (int i = 0; i < headers.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(headers.name(i)).append('=').append(headers.value(i));
+            String name = headers.name(i);
+            if (SensitiveHeaderSanitizer.isSafeForResponseLogging(name)) {
+                // Upstream values are untrusted and may echo credentials or user content.
+                values.add(name);
+            }
         }
-        return sb.append('}').toString();
+        return values.toString();
     }
 
 }

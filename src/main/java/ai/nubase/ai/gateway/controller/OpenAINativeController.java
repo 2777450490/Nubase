@@ -4,6 +4,7 @@ import ai.nubase.ai.gateway.entity.ModelPricing;
 import ai.nubase.ai.gateway.repository.ModelPricingRepository;
 import ai.nubase.ai.gateway.service.OpenAINativeApiService;
 import ai.nubase.ai.gateway.util.GatewayKeyUtil;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -65,10 +66,11 @@ public class OpenAINativeController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(openAIError(e.getMessage(), "invalid_request_error", "invalid_request"));
         } catch (IOException e) {
-            log.error("OpenAI image generation forwarding failed: {}", e.getMessage());
+            log.error("OpenAI image generation forwarding failed: errorType={}", errorType(e));
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(openAIError(e.getMessage(), "upstream_error", "upstream_error"));
+                    .body(openAIError("Image generation upstream request failed",
+                            "upstream_error", "upstream_error"));
         }
     }
 
@@ -198,7 +200,8 @@ public class OpenAINativeController {
                                 requestBody, upstreamName, clientApiKey, headers, emitter);
                     }
                 } catch (Exception e) {
-                    log.error("Failed to initialize OpenAI native streaming request: {}", e.getMessage());
+                    log.error("Failed to initialize OpenAI native streaming request: endpoint={}, errorType={}",
+                            endpoint.requestPath, errorType(e));
                     emitter.completeWithError(e);
                 }
                 return emitter;
@@ -217,12 +220,8 @@ public class OpenAINativeController {
                             requestBody, upstreamName, clientApiKey, headers);
                 };
 
-                log.info("========================================");
-                log.info("OpenAI native API response:");
-                log.info("Endpoint: {}", endpoint.requestPath);
-                log.info("Model: {}", model);
-                log.info("Response body: {}", response);
-                log.info("========================================");
+                log.info("OpenAI native API response completed: endpoint={}, model={}, responseBytes={}",
+                        endpoint.requestPath, model, utf8Length(response));
 
                 return ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_JSON)
@@ -230,12 +229,12 @@ public class OpenAINativeController {
             }
 
         } catch (IOException e) {
-            log.error("OpenAI native request forwarding failed: {}", e.getMessage());
+            log.error("OpenAI native request forwarding failed: endpoint={}, errorType={}",
+                    endpoint.requestPath, errorType(e));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"error\": {\"message\": \"" +
-                            e.getMessage().replace("\"", "\\\"") +
-                            "\", \"type\": \"server_error\", \"code\": \"internal_error\"}}");
+                    .body("{\"error\":{\"message\":\"Upstream request failed\","
+                            + "\"type\":\"server_error\",\"code\":\"internal_error\"}}");
         }
     }
 
@@ -286,12 +285,21 @@ public class OpenAINativeController {
             String headerName = headerNames.nextElement();
 
             // 转发自定义头和 user-agent
-            if (headerName.startsWith("x-") ||
-                    headerName.equalsIgnoreCase("user-agent")) {
+            if (!SensitiveHeaderSanitizer.isSensitive(headerName)
+                    && (headerName.regionMatches(true, 0, "x-", 0, 2)
+                    || headerName.equalsIgnoreCase("user-agent"))) {
                 headers.put(headerName, request.getHeader(headerName));
             }
         }
 
         return headers;
+    }
+
+    private static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static String errorType(Throwable throwable) {
+        return throwable == null ? "Unknown" : throwable.getClass().getSimpleName();
     }
 }

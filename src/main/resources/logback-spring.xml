@@ -154,14 +154,14 @@
             <appender-ref ref="MCP_FILE"/>
         </logger>
 
-        <!-- Claude Response Logger (dev: DEBUG level) -->
-        <logger name="ClaudeResponseLogger" level="DEBUG" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="ClaudeResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="CLAUDE_RESPONSE_FILE"/>
         </logger>
 
-        <!-- OpenAI Response Logger (dev: DEBUG level) -->
-        <logger name="OpenAIResponseLogger" level="DEBUG" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="OpenAIResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="OPENAI_RESPONSE_FILE"/>
         </logger>
@@ -185,14 +185,14 @@
             <appender-ref ref="MCP_FILE"/>
         </logger>
 
-        <!-- Claude Response Logger (production: INFO level) -->
-        <logger name="ClaudeResponseLogger" level="INFO" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="ClaudeResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="CLAUDE_RESPONSE_FILE"/>
         </logger>
 
-        <!-- OpenAI Response Logger (production: INFO level) -->
-        <logger name="OpenAIResponseLogger" level="INFO" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="OpenAIResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="OPENAI_RESPONSE_FILE"/>
         </logger>
@@ -213,10 +213,10 @@
         <logger name="McpLogger" level="INFO" additivity="false">
             <appender-ref ref="CONSOLE"/>
         </logger>
-        <logger name="ClaudeResponseLogger" level="INFO" additivity="false">
+        <logger name="ClaudeResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
         </logger>
-        <logger name="OpenAIResponseLogger" level="INFO" additivity="false">
+        <logger name="OpenAIResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
         </logger>
 
@@ -235,14 +235,14 @@
             <appender-ref ref="MCP_FILE"/>
         </logger>
 
-        <!-- Claude Response Logger (default: INFO level) -->
-        <logger name="ClaudeResponseLogger" level="INFO" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="ClaudeResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="CLAUDE_RESPONSE_FILE"/>
         </logger>
 
-        <!-- OpenAI Response Logger (default: INFO level) -->
-        <logger name="OpenAIResponseLogger" level="INFO" additivity="false">
+        <!-- Disabled: AI response payloads must never enter runtime logs. -->
+        <logger name="OpenAIResponseLogger" level="OFF" additivity="false">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="OPENAI_RESPONSE_FILE"/>
         </logger>

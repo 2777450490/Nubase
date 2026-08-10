@@ -78,7 +78,9 @@ public class OpenAIToClaudeConverter {
                                 toolCall.getFunction().getArguments(), Object.class);
                         toolUseBlock.putPOJO("input", inputObject);
                     } catch (JsonProcessingException e) {
-                        log.error("Failed to parse tool call arguments: {}", toolCall.getFunction().getArguments(), e);
+                        log.error("Failed to parse tool call arguments: argumentBytes={}, errorType={}",
+                                utf8Length(toolCall.getFunction().getArguments()),
+                                e.getClass().getSimpleName());
                         toolUseBlock.putObject("input");
                     }
 
@@ -391,5 +393,9 @@ public class OpenAIToClaudeConverter {
             return usage.getInputTokensDetails().getCachedTokens();
         }
         return 0;
+    }
+
+    private static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 }

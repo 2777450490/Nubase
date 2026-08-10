@@ -146,7 +146,8 @@ public class OpenAINativeApiService {
                 throw new IOException("Unable to get upstream config for channel: " + route.channelCode(), e);
             }
 
-            log.warn("Unable to get OpenAI upstream config from database, using config file: {}", e.getMessage());
+            log.warn("Unable to get OpenAI upstream config from database; using config file: errorType={}",
+                    errorType(e));
             GatewayRoutingContext.set(GatewayRoutingContext.Source.PLATFORM, "config-file");
             return new UpstreamInfo(
                     "config-file",
@@ -235,7 +236,7 @@ public class OpenAINativeApiService {
                     p.getTimeoutMs() == null ? openAIConfig.getTimeout() : p.getTimeoutMs(),
                     normalizeChatCompletionsPath(p.getChatCompletionsPath()));
         } catch (Exception e) {
-            log.warn("平台统一上游(OpenAI)解析失败: {}", e.getMessage());
+            log.warn("Unable to resolve platform OpenAI upstream: errorType={}", errorType(e));
             return null;
         }
     }
@@ -296,8 +297,8 @@ public class OpenAINativeApiService {
                         channelCode + "/", channelCode, normalizedModel, DEFAULT_PROVIDER);
             }
         } catch (Exception e) {
-            log.warn("Unable to resolve channel route from model prefix '{}', falling back: {}",
-                    channelCode, e.getMessage());
+            log.warn("Unable to resolve channel route from model prefix '{}'; falling back: errorType={}",
+                    channelCode, errorType(e));
         }
         return null;
     }
@@ -571,19 +572,18 @@ public class OpenAINativeApiService {
                     log.info("[upstream_error_transfer]✅ 故障转移成功，使用上游 '{}'", fallback.getName());
                     return result;
                 } catch (IOException failoverException) {
-                    log.warn("⚠️ 故障转移上游 '{}' 也失败了: {}",
-                            fallback.getName(), failoverException.getMessage());
+                    log.warn("Failover upstream '{}' failed: errorType={}",
+                            fallback.getName(), errorType(failoverException));
                     triedUpstreams.add(fallback.getName());
                 }
             }
 
             log.error("OpenAI-compatible route exhausted all upstreams ({}), tried: {}",
                     requestRoute.routingLabel(routeModelForSelection(model, requestRoute)), triedUpstreams);
-            // 所有上游都失败时再补打一次入参 (上面单上游失败已经打了一份, 这里给出完整故障转移视角)。
-            log.error("failing requestBody after exhausting upstreams (model={}, outboundModel={}, bytes={}): {}",
+            log.error("OpenAI-compatible request failed after exhausting upstreams "
+                            + "(model={}, outboundModel={}, bodyBytes={})",
                     model, outboundModel,
-                    outboundRequestBody == null ? 0 : outboundRequestBody.length(),
-                    truncateForLog(bodyForRequestLog(requestRoute.endpointPath(), outboundRequestBody), 4000));
+                    utf8Length(outboundRequestBody));
             throw primaryException;
         }
     }
@@ -602,10 +602,11 @@ public class OpenAINativeApiService {
         long effectiveTimeoutMs = route.callTimeoutMsOverride() > 0
                 ? route.callTimeoutMsOverride() : openAIConfig.getTimeout();
 
-        log.info("POST OpenAI-compatible native API - requestId={}, model={}, outboundModel={}, {}, upstream={}, url={}, bodyBytes={}, callTimeoutMs={}",
+        log.info("POST OpenAI-compatible native API - requestId={}, model={}, outboundModel={}, {}, upstream={}, "
+                        + "path={}, bodyBytes={}, callTimeoutMs={}",
                 requestId, originalModel, outboundModel,
                 route.routingLabel(routeModelForSelection(originalModel, route)),
-                upstream.name, url, bodyBytes, effectiveTimeoutMs);
+                upstream.name, endpointPath, bodyBytes, effectiveTimeoutMs);
 
         // 构建 HTTP 请求
         Request.Builder requestBuilder = new Request.Builder()
@@ -648,16 +649,14 @@ public class OpenAINativeApiService {
                         sleepForRetry();
                         continue;
                     } else {
-                        log.error("❌ [{}] 所有 {} 次 OpenAI 原生请求尝试均失败，状态码 {} - {}",
-                                requestId, maxAttempts, response.code(), responseBody);
-                        // 上游失败时把请求体打到日志, 方便线上复现 (截断, 避免炸日志)。
-                        log.error("❌ [{}] failing requestBody (model={}, outboundModel={}, bytes={}): {}",
-                                requestId, originalModel, outboundModel, bodyBytes,
-                                truncateForLog(bodyForRequestLog(endpointPath, outboundRequestBody), 4000));
+                        log.error("OpenAI native request failed: requestId={}, attempts={}, status={}, "
+                                        + "requestBytes={}, responseBytes={}, model={}, outboundModel={}",
+                                requestId, maxAttempts, response.code(), bodyBytes,
+                                utf8Length(responseBody), originalModel, outboundModel);
 
                         trackApiUsage(clientApiKey, requestId, originalModel, endpointPath, "POST",
                                 response.code(), null, duration, null, headers,
-                                "OpenAI native API error: " + responseBody);
+                                "OpenAI native API error: status=" + response.code());
 
                         requestLogService.logRequest(requestId, maskApiKey(clientApiKey), "POST",
                                 endpointPath, originalModel, headers,
@@ -666,15 +665,14 @@ public class OpenAINativeApiService {
                                 duration, TokenUsage.empty(),
                                 "OpenAI native API error");
 
-                        throw new IOException(
-                                "OpenAI API request failed: " + response.code() + " - " + responseBody);
+                        throw new IOException("OpenAI API request failed with status " + response.code());
                     }
                 }
 
                 // 从原生响应中提取 token 用量
                 TokenUsage tokenUsage = extractTokenUsageFromOpenAIResponse(responseBody);
                 logOpenAINativeUsageDiagnostics("non_stream_response", requestId, endpointPath,
-                        originalModel, upstream.name, responseBody, tokenUsage);
+                        originalModel, upstream.name, tokenUsage);
 
                 log.info("📥 [{}] OpenAI 原生响应: {} - 耗时: {} ms, Tokens: {}/{}/{}",
                         requestId, response.code(), duration,
@@ -701,20 +699,19 @@ public class OpenAINativeApiService {
                 String exClass = e.getClass().getName();
                 String exDetail = describeIoException(e, effectiveTimeoutMs);
                 if (attempt < maxAttempts) {
-                    log.warn("⚠️ [{}] OpenAI 原生请求尝试 {}/{} 抛异常 - upstream={}, url={}, bodyBytes={}, callTimeoutMs={}, attemptDurationMs={}, exType={}, detail={}, 3000ms 后重试...",
-                            requestId, attempt, maxAttempts, upstream.name, url, bodyBytes,
-                            effectiveTimeoutMs, attemptDuration, exClass, exDetail, e);
+                    log.warn("OpenAI native request attempt failed: requestId={}, attempt={}/{}, upstream={}, "
+                                    + "path={}, bodyBytes={}, callTimeoutMs={}, attemptDurationMs={}, "
+                                    + "errorType={}, detail={}; retrying",
+                            requestId, attempt, maxAttempts, upstream.name, endpointPath, bodyBytes,
+                            effectiveTimeoutMs, attemptDuration, exClass, exDetail);
                     sleepForRetry();
                 } else {
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("❌ [{}] 所有 {} 次 OpenAI 原生请求尝试均失败 - upstream={}, url={}, bodyBytes={}, callTimeoutMs={}, totalDurationMs={}, exType={}, detail={}",
-                            requestId, maxAttempts, upstream.name, url, bodyBytes,
-                            effectiveTimeoutMs, duration, exClass, exDetail, e);
-                    // 网络级 IOException (超时 / 拒连) 时也把请求体打到日志, 与 HTTP 非 2xx 路径对齐。
-                    log.error("❌ [{}] failing requestBody (model={}, outboundModel={}, bytes={}): {}",
-                            requestId, originalModel, outboundModel, bodyBytes,
-                            truncateForLog(bodyForRequestLog(endpointPath, outboundRequestBody), 4000));
-
+                    log.error("OpenAI native request exhausted attempts: requestId={}, attempts={}, upstream={}, "
+                                    + "path={}, bodyBytes={}, callTimeoutMs={}, totalDurationMs={}, "
+                                    + "errorType={}, detail={}",
+                            requestId, maxAttempts, upstream.name, endpointPath, bodyBytes,
+                            effectiveTimeoutMs, duration, exClass, exDetail);
                     trackApiUsage(clientApiKey, requestId, originalModel, endpointPath, "POST",
                             500, null, duration, null, headers, exClass + ": " + exDetail);
 
@@ -737,28 +734,19 @@ public class OpenAINativeApiService {
      * 区分: connect timeout / read timeout / call timeout / DNS / 拒接, 以便用户立刻判断要查上游还是查网络。
      */
     private String describeIoException(IOException e, long callTimeoutMs) {
-        String msg = e.getMessage() == null ? "" : e.getMessage();
-        String lower = msg.toLowerCase(Locale.ROOT);
         if (e instanceof java.net.SocketTimeoutException) {
-            if (lower.contains("connect")) {
-                return "TCP connect timeout (>" + callTimeoutMs + "ms) — 上游不可达 / 防火墙阻断";
-            }
-            return "read/idle timeout (>" + callTimeoutMs + "ms) — 上游接受了连接但未在窗口内响应; 可能是慢调用或 hang 住";
-        }
-        if (lower.contains("timeout")) {
-            // OkHttp callTimeout / 自定义 IOException("timeout")
-            return "call timeout (>" + callTimeoutMs + "ms) — 整体调用超过 callTimeout";
+            return "socket timeout (>" + callTimeoutMs + "ms)";
         }
         if (e instanceof java.net.UnknownHostException) {
-            return "DNS 解析失败: " + msg + " — 检查 upstream baseUrl";
+            return "DNS resolution failed";
         }
         if (e instanceof java.net.ConnectException) {
-            return "TCP 拒接: " + msg + " — 上游端口未监听 / baseUrl 错";
+            return "TCP connection failed";
         }
         if (e instanceof javax.net.ssl.SSLException) {
-            return "SSL/TLS 错误: " + msg;
+            return "SSL/TLS failure";
         }
-        return msg;
+        return "I/O failure";
     }
 
     // ==================== 流式请求 ====================
@@ -896,7 +884,7 @@ public class OpenAINativeApiService {
                                     || usage.getCacheReadInputTokens() > 0 || usage.getCacheCreationInputTokens() > 0) {
                                 accumulatedUsage.set(usage);
                                 logOpenAINativeUsageDiagnostics("stream_chunk", requestId, endpointPath,
-                                        model, upstream.name, data, usage);
+                                        model, upstream.name, usage);
                                 log.info("📊 [{}] OpenAI 原生流式 usage chunk - event={}, Tokens: {}/{}/{}",
                                         requestId, type,
                                         usage.getInputTokens(),
@@ -917,7 +905,8 @@ public class OpenAINativeApiService {
                         emitter.send(eventBuilder);
 
                     } catch (IOException e) {
-                        log.error("发送 SSE 事件到客户端失败: {}", e.getMessage(), e);
+                        log.error("Unable to send OpenAI native SSE event: requestId={}, errorType={}",
+                                requestId, errorType(e));
                         streamCompleted.set(true);
                         emitter.completeWithError(e);
                         eventSource.cancel();
@@ -938,7 +927,7 @@ public class OpenAINativeApiService {
                         return;
                     }
 
-                    String errorMsg = t != null ? t.getMessage() : "SSE 连接意外关闭";
+                    String errorMsg = t != null ? errorType(t) : "SSE connection closed unexpectedly";
                     log.error("❌ OpenAI 原生 SSE 连接失败, 请求 ID: {}, 错误: {}",
                             requestId, errorMsg);
 
@@ -949,7 +938,8 @@ public class OpenAINativeApiService {
                     if (response != null && response.body() != null) {
                         try {
                             errorBody = response.body().string();
-                            log.error("错误响应: {} - {}", response.code(), errorBody);
+                            log.error("OpenAI native SSE error response: requestId={}, status={}, responseBytes={}",
+                                    requestId, response.code(), utf8Length(errorBody));
 
                             // 发送错误事件到客户端
                             String errorEvent = String.format(
@@ -957,7 +947,8 @@ public class OpenAINativeApiService {
                                     errorBody.replace("\"", "\\\""), statusCode);
                             emitter.send(SseEmitter.event().data(errorEvent));
                         } catch (IOException e) {
-                            log.error("无法读取或发送错误响应: {}", e.getMessage());
+                            log.error("Unable to read or send OpenAI native SSE error response: "
+                                    + "requestId={}, errorType={}", requestId, errorType(e));
                         }
                     }
 
@@ -1045,12 +1036,14 @@ public class OpenAINativeApiService {
             });
 
             emitter.onError((e) -> {
-                log.error("❌ SSE 发射器错误, 请求 ID: {}, 错误: {}", requestId, e.getMessage());
+                log.error("OpenAI native SSE emitter error: requestId={}, errorType={}",
+                        requestId, errorType(e));
                 eventSource.cancel();
             });
 
         } catch (Exception e) {
-            log.error("初始化 OpenAI 原生流式请求失败: {}", e.getMessage(), e);
+            log.error("Failed to initialize OpenAI native streaming request: requestId={}, errorType={}",
+                    requestId, errorType(e));
             emitter.completeWithError(e);
         }
     }
@@ -1070,7 +1063,7 @@ public class OpenAINativeApiService {
                 return root.get("model").asText();
             }
         } catch (Exception e) {
-            log.debug("从请求体中提取模型名称失败: {}", e.getMessage());
+            log.debug("Unable to extract model from request: errorType={}", errorType(e));
         }
         return "unknown";
     }
@@ -1102,7 +1095,7 @@ public class OpenAINativeApiService {
                         .build();
             }
         } catch (Exception e) {
-            log.debug("从 OpenAI 响应中提取 token 用量失败: {}", e.getMessage());
+            log.debug("Unable to extract token usage from OpenAI response: errorType={}", errorType(e));
         }
         return TokenUsage.empty();
     }
@@ -1153,10 +1146,7 @@ public class OpenAINativeApiService {
     }
 
     private void logOpenAINativeUsageDiagnostics(String phase, String requestId, String endpoint, String model,
-                                                  String upstream, String responseBody, TokenUsage tokenUsage) {
-        String usageJson = extractUsageJson(responseBody);
-        log.info("api_usage.openai_native.raw phase={} requestId={} endpoint={} model={} upstream={} usage={}",
-                phase, requestId, endpoint, model, upstream, usageJson);
+                                                  String upstream, TokenUsage tokenUsage) {
         if (tokenUsage == null) {
             return;
         }
@@ -1172,25 +1162,6 @@ public class OpenAINativeApiService {
                 tokenUsage.getCacheCreationInputTokens(),
                 tokenUsage.getCacheReadInputTokens(),
                 empty);
-    }
-
-    private String extractUsageJson(String responseBody) {
-        if (responseBody == null || responseBody.isBlank()) {
-            return "<empty-body>";
-        }
-        try {
-            JsonNode root = objectMapper.readTree(responseBody);
-            JsonNode usage = findUsageNode(root);
-            if (usage == null || usage.isNull()) {
-                return "<missing-usage>";
-            }
-            String usageString = usage.toString();
-            return usageString.length() > 1000
-                    ? usageString.substring(0, 1000) + "...[+" + (usageString.length() - 1000) + "]"
-                    : usageString;
-        } catch (Exception e) {
-            return "<usage-parse-error:" + e.getMessage() + ">";
-        }
     }
 
     private String responseBodyForRequestLog(String endpointPath, String responseBody) {
@@ -1332,7 +1303,7 @@ public class OpenAINativeApiService {
             trackApiUsageWithTokenUsage(apiKey, requestId, model, endpoint, method, statusCode,
                     tokenUsage, durationMs, firstTokenLatencyMs, headers, errorMessage);
         } catch (Exception e) {
-            log.error("记录 API 用量失败: {}", e.getMessage(), e);
+            log.error("Failed to record API usage: requestId={}, errorType={}", requestId, errorType(e));
         }
     }
 
@@ -1370,7 +1341,7 @@ public class OpenAINativeApiService {
 
             usageTrackingService.trackUsage(record);
         } catch (Exception e) {
-            log.error("记录 API 用量失败: {}", e.getMessage(), e);
+            log.error("Failed to record API usage: requestId={}, errorType={}", requestId, errorType(e));
         }
     }
 
@@ -1396,7 +1367,7 @@ public class OpenAINativeApiService {
             JsonNode root = objectMapper.readTree(body);
             return root.has("messages") && !root.has("input");
         } catch (Exception e) {
-            log.debug("looksLikeChatCompletionsBody parse failed: {}", e.getMessage());
+            log.debug("looksLikeChatCompletionsBody parse failed: errorType={}", errorType(e));
             return false;
         }
     }
@@ -1424,23 +1395,17 @@ public class OpenAINativeApiService {
             objectNode.set("stream_options", options);
             return objectMapper.writeValueAsString(objectNode);
         } catch (Exception e) {
-            log.debug("ensureStreamUsageIncluded parse failed: {}", e.getMessage());
+            log.debug("ensureStreamUsageIncluded parse failed: errorType={}", errorType(e));
             return body;
         }
     }
 
-    /**
-     * 把请求体截断成日志友好的长度: 短的原样, 长的留头 + 尾 + 中间标注省略字符数。
-     */
-    private static String truncateForLog(String body, int maxChars) {
-        if (body == null) return "<null>";
-        if (body.length() <= maxChars) return body;
-        int head = Math.max(0, maxChars - 500);
-        int tail = Math.min(500, maxChars / 4);
-        int omitted = body.length() - head - tail;
-        return body.substring(0, head)
-                + "...[truncated " + omitted + " chars]..."
-                + body.substring(body.length() - tail);
+    static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    private static String errorType(Throwable throwable) {
+        return throwable == null ? "Unknown" : throwable.getClass().getSimpleName();
     }
 
 }

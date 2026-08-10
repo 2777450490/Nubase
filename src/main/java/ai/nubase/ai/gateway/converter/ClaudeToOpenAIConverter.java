@@ -170,21 +170,22 @@ public class ClaudeToOpenAIConverter {
             String role = messageNode.get("role").asText();
             JsonNode contentNode = messageNode.get("content");
 
-            if (contentNode.isTextual()) {
+            if (contentNode != null && contentNode.isTextual()) {
                 // 简单字符串内容
                 messages.add(OpenAIMessage.builder()
                         .role(role)
                         .content(contentNode.asText())
                         .build());
-            } else if (contentNode.isArray()) {
+            } else if (contentNode != null && contentNode.isArray()) {
                 // 内容块数组 - 处理 text、tool_use 和 tool_result
                 List<OpenAIMessage> convertedMessages = convertContentBlocks(role, contentNode, toolIdMapping);
                 messages.addAll(convertedMessages);
             } else {
-                log.warn("Unexpected content format in message: {}", contentNode);
+                log.warn("Unexpected content format in message: nodeType={}",
+                        contentNode == null ? "missing" : contentNode.getNodeType());
                 messages.add(OpenAIMessage.builder()
                         .role(role)
-                        .content(contentNode.toString())
+                        .content(contentNode == null ? "" : contentNode.toString())
                         .build());
             }
         }
@@ -224,7 +225,9 @@ public class ClaudeToOpenAIConverter {
                 try {
                     arguments = objectMapper.writeValueAsString(inputNode);
                 } catch (JsonProcessingException e) {
-                    log.error("Failed to serialize tool input to JSON string", e);
+                    log.error("Failed to serialize tool input: nodeType={}, errorType={}",
+                            inputNode == null ? "null" : inputNode.getNodeType(),
+                            e.getClass().getSimpleName());
                     arguments = "{}";
                 }
 

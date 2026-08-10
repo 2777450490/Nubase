@@ -33,7 +33,8 @@ public class UpstreamUsageTouchService {
                 log.debug("【upstream_usage_touch】no upstream row found for name={}", name);
             }
         } catch (Exception e) {
-            log.debug("【upstream_usage_touch】failed to touch name={}: {}", name, e.getMessage());
+            log.debug("【upstream_usage_touch】failed to touch: errorType={}",
+                    e.getClass().getSimpleName());
         }
     }
 }

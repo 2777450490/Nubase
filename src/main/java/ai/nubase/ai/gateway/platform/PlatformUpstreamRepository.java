@@ -196,7 +196,8 @@ public class PlatformUpstreamRepository {
             return objectMapper.readValue(json, new TypeReference<List<String>>() {
             });
         } catch (Exception e) {
-            log.warn("Failed to parse platform upstream supported_models: {}", e.getMessage());
+            log.warn("Failed to parse platform upstream supported_models: errorType={}",
+                    e.getClass().getSimpleName());
             return new ArrayList<>();
         }
     }

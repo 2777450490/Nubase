@@ -1,6 +1,7 @@
 package ai.nubase.ai.gateway.service;
 
 import ai.nubase.ai.gateway.dto.TokenUsage;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import ai.nubase.common.config.AnthropicConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -28,9 +29,9 @@ import java.util.Map;
  * DEV环境: 项目根目录/log/ai-gateway-logs
  * RELEASE环境: /root/nubase/logs/ai-gateway-logs
  * <p>
- * 每次调用创建一个独立的文件夹，使用年月日时分秒毫秒作为文件夹名称
+ * 每次调用创建一个独立的文件夹，使用年月日时分秒毫秒和请求 ID 作为文件夹名称
  * 文件夹结构：
- * .../ai-gateway-logs/yyyyMMdd_HHmmss_SSS/
+ * .../ai-gateway-logs/yyyyMMdd_HHmmss_SSS_requestId/
  * ├── request.json # 请求信息（包含请求头、请求体等）
  * ├── response.json # 响应信息（包含状态码、响应体等）
  * └── metadata.json # 元数据（请求ID、耗时、Token使用量等）
@@ -92,7 +93,8 @@ public class ApiRequestLogService {
         log.info("开始记录请求日志: requestId={}, method={}, path={}", requestId, method, path);
         try {
             // 创建本次调用的文件夹
-            String folderName = LocalDateTime.now().format(FOLDER_NAME_FORMATTER);
+            String folderName = LocalDateTime.now().format(FOLDER_NAME_FORMATTER)
+                    + "_" + safePathSegment(requestId);
             Path logFolder = Paths.get(logBaseDir, folderName);
             Files.createDirectories(logFolder);
 
@@ -113,7 +115,8 @@ public class ApiRequestLogService {
 
             log.debug("请求日志已写入文件夹: requestId={}, folder={}", requestId, logFolder);
         } catch (Exception e) {
-            log.error("写入请求日志失败: requestId={}, error={}", requestId, e.getMessage(), e);
+            log.error("写入请求日志失败: requestId={}, errorType={}",
+                    requestId, e.getClass().getSimpleName());
         }
     }
 
@@ -136,7 +139,11 @@ public class ApiRequestLogService {
 
         // 请求头
         if (requestHeaders != null && !requestHeaders.isEmpty()) {
-            requestInfo.set("headers", objectMapper.valueToTree(requestHeaders));
+            Map<String, String> sanitizedHeaders =
+                    SensitiveHeaderSanitizer.sanitizeForPersistence(requestHeaders);
+            if (!sanitizedHeaders.isEmpty()) {
+                requestInfo.set("headers", objectMapper.valueToTree(sanitizedHeaders));
+            }
         }
 
         // 请求体
@@ -218,5 +225,12 @@ public class ApiRequestLogService {
         String jsonString = objectMapper.writerWithDefaultPrettyPrinter()
                 .writeValueAsString(jsonNode);
         Files.write(filePath, jsonString.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String safePathSegment(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            return "unknown";
+        }
+        return requestId.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 }

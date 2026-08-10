@@ -173,8 +173,8 @@ public class MemConfigResolver {
             }
             return node;
         } catch (Exception e) {
-            log.debug("mem config lookup '{}' failed, falling back to YAML: {}",
-                    dottedPath, e.getMessage());
+            log.debug("mem config lookup failed; falling back to YAML: errorType={}",
+                    e.getClass().getSimpleName());
             return null;
         }
     }

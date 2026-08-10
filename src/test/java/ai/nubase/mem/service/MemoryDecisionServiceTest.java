@@ -9,6 +9,9 @@ import ai.nubase.mem.service.MemoryDecisionService.ExistingMemory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.List;
 
@@ -20,6 +23,7 @@ import static org.mockito.Mockito.when;
 /**
  * Verifies decision-JSON parsing, normalization (uppercase events), and fallbacks.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class MemoryDecisionServiceTest {
 
     private LLMProviderRegistry registry;
@@ -86,9 +90,10 @@ class MemoryDecisionServiceTest {
     }
 
     @Test
-    void fallsBackToAddAllOnLLMException() {
+    void fallsBackToAddAllOnLLMExceptionWithoutLoggingProviderMessage(CapturedOutput output) {
+        String sentinel = "decision-provider-private-sentinel";
         when(chatProvider.chat(any(ChatRequest.class)))
-                .thenThrow(new LLMException("boom"));
+                .thenThrow(new LLMException(sentinel));
 
         List<Decision> result = svc.decide(List.of(), List.of("fact1", "fact2"));
 
@@ -96,17 +101,39 @@ class MemoryDecisionServiceTest {
         assertThat(result).allSatisfy(d -> assertThat(d.getEvent()).isEqualTo("ADD"));
         assertThat(result.get(0).getText()).isEqualTo("fact1");
         assertThat(result.get(1).getText()).isEqualTo("fact2");
+        assertThat(output.getAll())
+                .contains("errorType=LLMException")
+                .doesNotContain(sentinel);
     }
 
     @Test
-    void fallsBackOnMalformedJson() {
-        when(chatProvider.chat(any(ChatRequest.class))).thenReturn("not json");
+    void fallsBackOnMalformedJsonWithoutLoggingRawResponse(CapturedOutput output) {
+        String sentinel = "decision-response-private-sentinel";
+        when(chatProvider.chat(any(ChatRequest.class))).thenReturn(sentinel);
 
         List<Decision> result = svc.decide(List.of(), List.of("fact1"));
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getEvent()).isEqualTo("ADD");
         assertThat(result.get(0).getText()).isEqualTo("fact1");
+        assertThat(output.getAll())
+                .contains("errorType=JsonParseException", "responseChars=" + sentinel.length())
+                .doesNotContain(sentinel);
+    }
+
+    @Test
+    void fallsBackOnNonArrayMemoryWithoutLoggingRawResponse(CapturedOutput output) {
+        String sentinel = "decision-field-private-sentinel";
+        String raw = "{\"memory\":\"" + sentinel + "\"}";
+        when(chatProvider.chat(any(ChatRequest.class))).thenReturn(raw);
+
+        List<Decision> result = svc.decide(List.of(), List.of("fact1"));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getEvent()).isEqualTo("ADD");
+        assertThat(output.getAll())
+                .contains("nodeType=STRING", "responseChars=" + raw.length())
+                .doesNotContain(sentinel);
     }
 
     @Test

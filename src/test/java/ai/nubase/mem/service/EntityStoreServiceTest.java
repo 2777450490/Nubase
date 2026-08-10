@@ -7,6 +7,9 @@ import ai.nubase.mem.service.FactExtractionService.ExtractedEntity;
 import ai.nubase.mem.service.MemConfigResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
@@ -30,6 +33,7 @@ import static org.mockito.Mockito.when;
  * Unit tests for {@link EntityStoreService}. Repositories and embedding service are mocked
  * so this runs without a database or LLM.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class EntityStoreServiceTest {
 
     private static final UUID USER_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -147,16 +151,41 @@ class EntityStoreServiceTest {
     }
 
     @Test
-    void linkEntities_silentlyDropsEntityWhenEmbeddingFails() {
+    void linkEntities_embeddingFailureLogsOnlySafeMetadata(CapturedOutput output) {
+        String entityText = "entity-embedding-private-sentinel";
+        String failure = "embedding-failure-private-sentinel";
         when(entityRepository.findByExactText(anyString(), any(), any(), any(), any()))
                 .thenReturn(Optional.empty());
-        when(embeddingService.embed("Tokyo")).thenThrow(new RuntimeException("openai down"));
+        when(embeddingService.embed(entityText)).thenThrow(new RuntimeException(failure));
 
         svc.linkEntities(MEM_ID,
-                List.of(ExtractedEntity.builder().text("Tokyo").type("location").build()),
+                List.of(ExtractedEntity.builder().text(entityText).type("location").build()),
                 USER_ID, null, null);
 
         verify(entityRepository, never()).insert(any(), any());
+        assertThat(output.getAll())
+                .contains(
+                        "entityTextChars=" + entityText.length(),
+                        "errorType=RuntimeException")
+                .doesNotContain(entityText, failure, MEM_ID.toString());
+    }
+
+    @Test
+    void linkEntities_repositoryFailureLogsOnlySafeMetadata(CapturedOutput output) {
+        String entityText = "entity-store-private-sentinel";
+        String failure = "repository-failure-private-sentinel";
+        when(entityRepository.findByExactText(anyString(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException(failure));
+
+        svc.linkEntities(MEM_ID,
+                List.of(ExtractedEntity.builder().text(entityText).type("person").build()),
+                USER_ID, null, null);
+
+        assertThat(output.getAll())
+                .contains(
+                        "entityTextChars=" + entityText.length(),
+                        "errorType=IllegalStateException")
+                .doesNotContain(entityText, failure, MEM_ID.toString());
     }
 
     @Test
@@ -255,6 +284,38 @@ class EntityStoreServiceTest {
     }
 
     @Test
+    void computeBoostFailuresLogOnlySafeMetadata(CapturedOutput output) {
+        String embeddingEntity = "query-embedding-private-sentinel";
+        String searchEntity = "query-search-private-sentinel";
+        String embeddingFailure = "query-embedding-failure-private-sentinel";
+        String searchFailure = "query-search-failure-private-sentinel";
+        when(embeddingService.embed(embeddingEntity))
+                .thenThrow(new IllegalStateException(embeddingFailure));
+        when(embeddingService.embed(searchEntity)).thenReturn(new float[]{1f});
+        when(entityRepository.searchByVector(any(), any(), any(), any(), anyInt()))
+                .thenThrow(new IllegalArgumentException(searchFailure));
+
+        Map<UUID, Double> boosts = svc.computeBoosts(
+                List.of(
+                        ExtractedEntity.builder().text(embeddingEntity).build(),
+                        ExtractedEntity.builder().text(searchEntity).build()),
+                USER_ID, null, null);
+
+        assertThat(boosts).isEmpty();
+        assertThat(output.getAll())
+                .contains(
+                        "entityTextChars=" + embeddingEntity.length(),
+                        "entityTextChars=" + searchEntity.length(),
+                        "errorType=IllegalStateException",
+                        "errorType=IllegalArgumentException")
+                .doesNotContain(
+                        embeddingEntity,
+                        searchEntity,
+                        embeddingFailure,
+                        searchFailure);
+    }
+
+    @Test
     void unlinkMemory_delegatesToRepository() {
         svc.unlinkMemory(MEM_ID, USER_ID, "agentA", null);
         verify(entityRepository).removeMemoryLinks(MEM_ID, USER_ID, "agentA", null);
@@ -305,7 +366,7 @@ class EntityStoreServiceTest {
     }
 
     @Test
-    void findByIdForScope_otherOwnerReturnsEmpty() {
+    void findByIdForScope_otherOwnerReturnsEmptyWithoutLoggingIdentifiers(CapturedOutput output) {
         authenticateAsUser();
         try {
             UUID owner = UUID.randomUUID();
@@ -315,6 +376,9 @@ class EntityStoreServiceTest {
             // current user is USER_ID, entity owner is `owner` → cross-owner reject.
             var res = svc.findByIdForScope(ENT_ID_1);
             assertThat(res).isEmpty();
+            assertThat(output.getAll())
+                    .contains("Cross-owner entity access denied")
+                    .doesNotContain(USER_ID.toString(), owner.toString());
         } finally {
             ai.nubase.common.context.MultiTenancyContext.clear();
             org.springframework.security.core.context.SecurityContextHolder.clearContext();
@@ -369,10 +433,26 @@ class EntityStoreServiceTest {
     }
 
     @Test
-    void unlinkMemory_swallowsRepositoryException() {
-        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+    void unlinkFailuresLogOnlySafeMetadata(CapturedOutput output) {
+        String singleFailure = "single-unlink-private-sentinel";
+        String bulkFailure = "bulk-unlink-private-sentinel";
+        org.mockito.Mockito.doThrow(new RuntimeException(singleFailure))
                 .when(entityRepository).removeMemoryLinks(any(), any(), any(), any());
-        // Should not throw
+        when(entityRepository.removeMemoryLinksBulk(any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException(bulkFailure));
+
         svc.unlinkMemory(MEM_ID_2, USER_ID, null, null);
+        svc.unlinkMemoriesBulk(List.of(MEM_ID, MEM_ID_2), USER_ID, null, null);
+
+        assertThat(output.getAll())
+                .contains(
+                        "errorType=RuntimeException",
+                        "memoryCount=2",
+                        "errorType=IllegalStateException")
+                .doesNotContain(
+                        singleFailure,
+                        bulkFailure,
+                        MEM_ID.toString(),
+                        MEM_ID_2.toString());
     }
 }

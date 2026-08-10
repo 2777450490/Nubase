@@ -20,7 +20,10 @@ import ai.nubase.mem.service.MemoryDecisionService.Decision;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -48,6 +51,7 @@ import static org.mockito.Mockito.when;
  * Orchestration-level tests for {@link MemoryService}. Repositories and the LLM-facing
  * services are mocked so this runs without a database or network.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class MemoryServiceTest {
 
     private MemProperties props;
@@ -367,11 +371,12 @@ class MemoryServiceTest {
     }
 
     @Test
-    void add_sessionHistoryReadFailure_degradesGracefully() {
+    void add_sessionHistoryReadFailure_degradesGracefullyWithoutLoggingDetails(CapturedOutput output) {
+        String sentinel = "session-history-private-sentinel";
         props.getSession().setEnabled(true);
         props.getSession().setInjectIntoExtraction(true);
         when(sessionMessageRepository.findRecent(anyString(), anyInt()))
-                .thenThrow(new RuntimeException("db down"));
+                .thenThrow(new RuntimeException(sentinel));
         when(factExtractionService.extract(anyList()))
                 .thenReturn(FactExtractionResult.empty());
 
@@ -386,6 +391,9 @@ class MemoryServiceTest {
         verify(factExtractionService).extract(captor.capture());
         assertThat(captor.getValue()).hasSize(1);
         assertThat(captor.getValue().get(0).getContent()).isEqualTo("hi");
+        assertThat(output.getAll())
+                .contains("errorType=RuntimeException", "currentMessageCount=1")
+                .doesNotContain(sentinel, USER_ID.toString());
     }
 
     // ============================================================================
@@ -393,7 +401,8 @@ class MemoryServiceTest {
     // ============================================================================
 
     @Test
-    void add_unknownDecisionEvent_returnsSkippedNotNull() {
+    void add_unknownDecisionEvent_returnsSkippedNotNullWithoutLoggingValue(CapturedOutput output) {
+        String sentinel = "PRIVATE_EVENT_SENTINEL";
         AddMemoryRequest req = new AddMemoryRequest();
         req.setUserId(USER_ID);
         req.setMessages(List.of(ChatMessage.user("hi")));
@@ -403,7 +412,7 @@ class MemoryServiceTest {
         when(memoryRepository.searchByVector(any(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(List.of());
         when(memoryDecisionService.decide(any(), any())).thenReturn(List.of(
-                Decision.builder().event("MAYBE").id("new_0").text("f1").build()
+                Decision.builder().event(sentinel).id("new_0").text("f1").build()
         ));
 
         var events = svc.add(req);
@@ -411,6 +420,9 @@ class MemoryServiceTest {
         assertThat(events).hasSize(1).doesNotContainNull();
         assertThat(events.get(0).getEvent()).isEqualTo("SKIPPED");
         assertThat(events.get(0).getPreviousMemory()).contains("unknown event");
+        assertThat(output.getAll())
+                .contains("Unknown memory decision event")
+                .doesNotContain(sentinel);
     }
 
     @Test
@@ -875,7 +887,8 @@ class MemoryServiceTest {
     }
 
     @Test
-    void search_entityBoostFailureDegradesGracefully() {
+    void search_entityBoostFailureDegradesGracefullyWithoutLoggingDetails(CapturedOutput output) {
+        String sentinel = "entity-boost-private-sentinel";
         when(embeddingService.embed(anyString())).thenReturn(new float[]{1f});
         Memory semA = Memory.builder().id(MEM_ID_1).userId(USER_ID).memory("vec-A").score(0.1).build();
         when(memoryRepository.searchByVector(any(), any(), any(), any(),
@@ -888,7 +901,7 @@ class MemoryServiceTest {
                 .thenReturn(List.of());
 
         when(queryEntityExtractionService.extract(anyString()))
-                .thenThrow(new RuntimeException("boom"));
+                .thenThrow(new RuntimeException(sentinel));
 
         SearchMemoryRequest req = new SearchMemoryRequest();
         req.setQuery("hello");
@@ -896,6 +909,9 @@ class MemoryServiceTest {
         var res = svc.search(req);
 
         assertThat(res).hasSize(1); // search still returns
+        assertThat(output.getAll())
+                .contains("errorType=RuntimeException")
+                .doesNotContain(sentinel);
     }
 
     @Test
@@ -1069,7 +1085,7 @@ class MemoryServiceTest {
     }
 
     @Test
-    void deleteAll_cleansEntityLinksThenSoftDeletes() {
+    void deleteAll_cleansEntityLinksThenSoftDeletesWithoutLoggingOwnerIds(CapturedOutput output) {
         // 1. Select victims first.
         List<UUID> victims = List.of(MEM_ID_1, MEM_ID_2);
         when(memoryRepository.selectIdsByOwner(eq(USER_ID), eq("agentA"),
@@ -1087,6 +1103,9 @@ class MemoryServiceTest {
         inOrder.verify(memoryRepository).selectIdsByOwner(USER_ID, "agentA", null);
         inOrder.verify(entityStoreService).unlinkMemoriesBulk(victims, USER_ID, "agentA", null);
         inOrder.verify(memoryRepository).softDeleteByOwner(USER_ID, "agentA", null);
+        assertThat(output.getAll())
+                .contains("deletedCount=17", "entityLinkCount=2")
+                .doesNotContain(USER_ID.toString(), MEM_ID_1.toString(), MEM_ID_2.toString(), "agentA");
     }
 
     @Test

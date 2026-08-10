@@ -93,7 +93,8 @@ public class MemoryDecisionService {
             userMessage = objectMapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(userPayload);
         } catch (Exception e) {
-            log.warn("Failed to serialize decision payload, falling back to ADD-only", e);
+            log.warn("Failed to serialize decision payload; falling back to ADD-only: errorType={}",
+                    errorType(e));
             return fallbackAllAdd(newFacts);
         }
 
@@ -111,7 +112,8 @@ public class MemoryDecisionService {
         try {
             raw = providers.chat().chat(req);
         } catch (Exception e) {
-            log.warn("Memory-decision LLM call failed, falling back to ADD-only: {}", e.getMessage());
+            log.warn("Memory-decision LLM call failed; falling back to ADD-only: errorType={}",
+                    errorType(e));
             return fallbackAllAdd(newFacts);
         }
 
@@ -127,7 +129,9 @@ public class MemoryDecisionService {
             JsonNode root = objectMapper.readTree(cleaned);
             JsonNode memory = root.path("memory");
             if (!memory.isArray()) {
-                log.warn("Decision response missing 'memory' array, falling back to ADD-only. raw={}", raw);
+                log.warn(
+                        "Decision response missing memory array; falling back to ADD-only: nodeType={}, responseChars={}",
+                        memory.getNodeType(), raw.length());
                 return fallbackAllAdd(newFacts);
             }
             List<Decision> out = new ArrayList<>(memory.size());
@@ -142,9 +146,16 @@ public class MemoryDecisionService {
             }
             return out;
         } catch (Exception e) {
-            log.warn("Failed to parse decision JSON, falling back to ADD-only: {}", e.getMessage());
+            log.warn(
+                    "Failed to parse decision JSON; falling back to ADD-only: errorType={}, responseChars={}",
+                    errorType(e), raw.length());
             return fallbackAllAdd(newFacts);
         }
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 
     private static List<Decision> fallbackAllAdd(List<String> newFacts) {

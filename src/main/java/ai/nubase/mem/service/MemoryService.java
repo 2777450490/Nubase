@@ -152,8 +152,9 @@ public class MemoryService {
                     history.size(), currentMessages.size());
             return merged;
         } catch (Exception e) {
-            log.warn("Failed to load session history for scope '{}', extracting without context: {}",
-                    scope, e.getMessage());
+            log.warn(
+                    "Failed to load session history; extracting without context: errorType={}, currentMessageCount={}",
+                    errorType(e), currentMessages.size());
             return currentMessages;
         }
     }
@@ -198,7 +199,7 @@ public class MemoryService {
                 case "DELETE" -> applyDelete(d, req);
                 case "NONE" -> applyNone(d, entitiesByText, req);
                 default -> {
-                    log.warn("Unknown decision event: {}", d.getEvent());
+                    log.warn("Unknown memory decision event");
                     yield skipped(d, "unknown event '" + d.getEvent() + "'");
                 }
             };
@@ -284,15 +285,14 @@ public class MemoryService {
                                             AddMemoryRequest req) {
         UUID id = parseUuidQuiet(d.getId());
         if (id == null) {
-            log.warn("UPDATE decision missing valid existing id: {}", d);
+            log.warn("UPDATE decision is missing a valid existing id");
             return null;
         }
         // Owner-scoped lookup: even though the LLM picks the id from a list we already
         // scoped to the caller, hallucinated cross-owner UUIDs would otherwise sneak through.
         Optional<Memory> existing = memoryRepository.findByIdForOwner(id, req.getUserId());
         if (existing.isEmpty()) {
-            log.warn("UPDATE decision references unknown or unauthorized memory id {}; "
-                    + "treating as ADD", id);
+            log.warn("UPDATE decision references an unknown or unauthorized memory; treating as ADD");
             return applyAdd(d, Map.of(), entitiesByText, req);
         }
         String newText = d.getText();
@@ -508,9 +508,7 @@ public class MemoryService {
         if (!scope.canAccess(mem.get().getUserId())) {
             // Belt + suspenders: should be unreachable given findByIdForOwner above, but if
             // the repo SQL ever drifts we still refuse here.
-            log.warn("Cross-owner access denied: caller userId={} tried to access memory {} "
-                    + "owned by userId={}",
-                    scope.getUserId(), id, mem.get().getUserId());
+            log.warn("Cross-owner memory access denied");
             return Optional.empty();
         }
         return mem;
@@ -561,7 +559,8 @@ public class MemoryService {
             entityBoosts = entityStoreService.computeBoosts(
                     queryEntities, req.getUserId(), req.getAgentId(), req.getRunId());
         } catch (Exception e) {
-            log.warn("Entity-boost computation failed, continuing without it: {}", e.getMessage());
+            log.warn("Entity-boost computation failed; continuing without it: errorType={}",
+                    errorType(e));
             entityBoosts = Map.of();
         }
 
@@ -678,10 +677,14 @@ public class MemoryService {
 
         // 3. Soft-delete the memories.
         int count = memoryRepository.softDeleteByOwner(effUserId, effAgentId, effRunId);
-        log.info("Batch soft-deleted {} memories for owner userId={} agentId={} runId={} "
-                        + "(entity links cleaned for {} ids)",
-                count, effUserId, effAgentId, effRunId, victimIds.size());
+        log.info("Batch soft-deleted memories: deletedCount={}, entityLinkCount={}",
+                count, victimIds.size());
         return count;
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 
     /**

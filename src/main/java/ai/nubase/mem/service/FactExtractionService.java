@@ -130,7 +130,9 @@ public class FactExtractionService {
             JsonNode root = objectMapper.readTree(cleaned);
             JsonNode factsNode = root.path("facts");
             if (!factsNode.isArray()) {
-                log.warn("Fact extraction returned non-array 'facts' field, raw={}", raw);
+                log.warn(
+                        "Fact extraction returned non-array facts field: nodeType={}, responseChars={}",
+                        factsNode.getNodeType(), raw.length());
                 return FactExtractionResult.empty();
             }
             List<String> facts = new ArrayList<>(factsNode.size());
@@ -159,9 +161,16 @@ public class FactExtractionService {
 
             return FactExtractionResult.builder().facts(facts).entities(entities).build();
         } catch (Exception e) {
-            log.warn("Failed to parse fact-extraction JSON ({}): {}", e.getMessage(), raw);
+            log.warn(
+                    "Failed to parse fact-extraction JSON: errorType={}, responseChars={}",
+                    errorType(e), raw.length());
             return FactExtractionResult.empty();
         }
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 
     private List<ExtractedEntity> parseEntityArray(JsonNode arr) {

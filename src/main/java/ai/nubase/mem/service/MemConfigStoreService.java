@@ -84,7 +84,7 @@ public class MemConfigStoreService {
                         + "    updated_by = EXCLUDED.updated_by",
                 serialized, actor);
         cache.remove(tenant);
-        log.info("mem.config updated for tenant={} by={}", tenant, actor);
+        log.info("mem.config updated");
         return current;
     }
 
@@ -112,8 +112,8 @@ public class MemConfigStoreService {
         } catch (Exception e) {
             // mem.config table missing (older tenant) or parse error: log + degrade to
             // YAML-only. Never let config read failures break the main flow.
-            log.warn("Failed to load mem.config for tenant={}, falling back to YAML "
-                    + "defaults: {}", tenant, e.getMessage());
+            log.warn("Failed to load mem.config; falling back to YAML defaults: errorType={}",
+                    e.getClass().getSimpleName());
             return JsonNodeFactory.instance.objectNode();
         }
     }

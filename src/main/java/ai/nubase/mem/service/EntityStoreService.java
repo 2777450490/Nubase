@@ -79,8 +79,9 @@ public class EntityStoreService {
             try {
                 upsertAndLink(e, memoryId, userId, agentId, runId);
             } catch (Exception ex) {
-                log.warn("Failed to link entity '{}' to memory {}: {}",
-                        e.getText(), memoryId, ex.getMessage());
+                log.warn(
+                        "Failed to link extracted entity: entityTextChars={}, errorType={}",
+                        textLength(e.getText()), errorType(ex));
             }
         }
     }
@@ -103,7 +104,9 @@ public class EntityStoreService {
         try {
             embedding = embeddingService.embed(e.getText());
         } catch (Exception ex) {
-            log.warn("Skipping entity '{}' — embedding unavailable: {}", e.getText(), ex.getMessage());
+            log.warn(
+                    "Skipping extracted entity because embedding is unavailable: entityTextChars={}, errorType={}",
+                    textLength(e.getText()), errorType(ex));
             return;
         }
 
@@ -171,14 +174,18 @@ public class EntityStoreService {
             try {
                 qVec = embeddingService.embed(qe.getText());
             } catch (Exception ex) {
-                log.warn("Skipping boost for query entity '{}': {}", qe.getText(), ex.getMessage());
+                log.warn(
+                        "Skipping boost because query entity embedding failed: entityTextChars={}, errorType={}",
+                        textLength(qe.getText()), errorType(ex));
                 continue;
             }
             List<Entity> matches;
             try {
                 matches = entityRepository.searchByVector(qVec, userId, agentId, runId, ENTITY_NEIGHBORS);
             } catch (Exception ex) {
-                log.warn("Entity store search failed for '{}': {}", qe.getText(), ex.getMessage());
+                log.warn(
+                        "Entity store search failed: entityTextChars={}, errorType={}",
+                        textLength(qe.getText()), errorType(ex));
                 continue;
             }
 
@@ -208,7 +215,7 @@ public class EntityStoreService {
         try {
             entityRepository.removeMemoryLinks(memoryId, userId, agentId, runId);
         } catch (Exception ex) {
-            log.warn("Failed to remove entity links for memory {}: {}", memoryId, ex.getMessage());
+            log.warn("Failed to remove entity links: errorType={}", errorType(ex));
         }
     }
 
@@ -223,7 +230,9 @@ public class EntityStoreService {
             int touched = entityRepository.removeMemoryLinksBulk(memoryIds, userId, agentId, runId);
             log.info("Bulk-unlinked {} memory ids across {} entity rows", memoryIds.size(), touched);
         } catch (Exception ex) {
-            log.warn("Bulk entity unlink failed for {} ids: {}", memoryIds.size(), ex.getMessage());
+            log.warn(
+                    "Bulk entity unlink failed: memoryCount={}, errorType={}",
+                    memoryIds.size(), errorType(ex));
         }
     }
 
@@ -260,8 +269,7 @@ public class EntityStoreService {
         var ent = entityRepository.findById(id);
         if (ent.isEmpty()) return java.util.Optional.empty();
         if (!scope.canAccess(ent.get().getUserId())) {
-            log.warn("Cross-owner entity access denied: scope={} entity_owner={}",
-                    scope.getUserId(), ent.get().getUserId());
+            log.warn("Cross-owner entity access denied");
             return java.util.Optional.empty();
         }
         return ent;
@@ -293,5 +301,14 @@ public class EntityStoreService {
         MemoryAuthScope scope = MemoryAuthScope.fromContext(null, null, null);
         UUID ownerFilter = scope.isUnrestricted() ? null : scope.getUserId();
         return entityRepository.findByLinkedMemoryId(memoryId, ownerFilter);
+    }
+
+    private static int textLength(String text) {
+        return text == null ? 0 : text.length();
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 }

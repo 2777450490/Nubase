@@ -60,7 +60,9 @@ public class QueryEntityExtractionService {
         try {
             raw = providers.chat().chat(req);
         } catch (Exception e) {
-            log.warn("Query-entity extraction failed, falling back to no boost: {}", e.getMessage());
+            log.warn(
+                    "Query-entity extraction failed; falling back to no boost: errorType={}, queryChars={}",
+                    errorType(e), query.length());
             return List.of();
         }
         return parse(raw);
@@ -87,8 +89,15 @@ public class QueryEntityExtractionService {
             }
             return out;
         } catch (Exception e) {
-            log.warn("Failed to parse query-entity JSON ({}): {}", e.getMessage(), raw);
+            log.warn(
+                    "Failed to parse query-entity JSON: errorType={}, responseChars={}",
+                    errorType(e), raw.length());
             return List.of();
         }
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isEmpty() ? "Throwable" : simpleName;
     }
 }

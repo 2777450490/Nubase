@@ -314,8 +314,7 @@ public class MemoryRepository {
                 : null;
         if (configured == null || !ALLOWED_FTS_CONFIGS.contains(configured.toLowerCase())) {
             if (configured != null) {
-                log.warn("Unknown ftsConfig '{}' — falling back to 'simple'. Allowed: {}",
-                        configured, ALLOWED_FTS_CONFIGS);
+                log.warn("Unknown ftsConfig; falling back to 'simple'");
             }
             return "simple";
         }
@@ -500,7 +499,8 @@ public class MemoryRepository {
         try {
             return objectMapper.writeValueAsString(map);
         } catch (Exception e) {
-            log.warn("Failed to serialize metadata, defaulting to empty: {}", e.getMessage());
+            log.warn("Failed to serialize memory metadata; defaulting to empty: errorType={}",
+                    e.getClass().getSimpleName());
             return "{}";
         }
     }
@@ -512,7 +512,8 @@ public class MemoryRepository {
         try {
             return objectMapper.readValue(s, new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
-            log.warn("Failed to parse metadata JSON, defaulting to empty: {}", e.getMessage());
+            log.warn("Failed to parse memory metadata JSON; defaulting to empty: errorType={}",
+                    e.getClass().getSimpleName());
             return new HashMap<>();
         }
     }

@@ -359,8 +359,8 @@ public class EntityRepository {
         try {
             jdbcTemplate.execute("TRUNCATE TABLE " + TABLE);
         } catch (org.springframework.jdbc.BadSqlGrammarException e) {
-            log.warn("mem.entities not present on this tenant — skipping truncate ({})",
-                    e.getMostSpecificCause().getMessage());
+            log.warn("mem.entities is unavailable; skipping truncate: errorType={}",
+                    e.getClass().getSimpleName());
         }
     }
 

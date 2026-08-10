@@ -9,6 +9,9 @@ import ai.nubase.mem.service.FactExtractionService.ExtractedEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.List;
 
@@ -19,6 +22,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class QueryEntityExtractionServiceTest {
 
     private LLMProviderRegistry registry;
@@ -82,16 +86,28 @@ class QueryEntityExtractionServiceTest {
     }
 
     @Test
-    void llmFailureReturnsEmpty() {
-        when(chat.chat(any(ChatRequest.class))).thenThrow(new LLMException("boom"));
-        List<ExtractedEntity> entities = svc.extract("anything");
+    void llmFailureLogsOnlySafeMetadata(CapturedOutput output) {
+        String query = "query-input-private-sentinel";
+        String failure = "query-provider-private-sentinel";
+        when(chat.chat(any(ChatRequest.class))).thenThrow(new LLMException(failure));
+
+        List<ExtractedEntity> entities = svc.extract(query);
+
         assertThat(entities).isEmpty();
+        assertThat(output.getAll())
+                .contains("errorType=LLMException", "queryChars=" + query.length())
+                .doesNotContain(query, failure);
     }
 
     @Test
-    void malformedJsonReturnsEmpty() {
-        when(chat.chat(any(ChatRequest.class))).thenReturn("not-json");
+    void malformedResponseLogsOnlySafeMetadata(CapturedOutput output) {
+        String sentinel = "query-response-private-sentinel";
+        when(chat.chat(any(ChatRequest.class))).thenReturn(sentinel);
+
         assertThat(svc.extract("anything")).isEmpty();
+        assertThat(output.getAll())
+                .contains("Failed to parse query-entity JSON", "errorType=", "responseChars=")
+                .doesNotContain(sentinel);
     }
 
     @Test

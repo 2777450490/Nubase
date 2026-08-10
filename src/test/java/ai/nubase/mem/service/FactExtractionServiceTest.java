@@ -10,7 +10,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.List;
 
@@ -23,6 +26,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for fact extraction. The chat provider is fully mocked.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class FactExtractionServiceTest {
 
     private LLMProviderRegistry registry;
@@ -130,12 +134,30 @@ class FactExtractionServiceTest {
     }
 
     @Test
-    void returnsEmptyOnMalformedJson() {
-        when(chatProvider.chat(any(ChatRequest.class))).thenReturn("not-json");
+    void malformedResponseLogsOnlySafeMetadata(CapturedOutput output) {
+        String sentinel = "fact-response-private-sentinel";
+        when(chatProvider.chat(any(ChatRequest.class))).thenReturn(sentinel);
 
         FactExtractionResult result = svc.extract(List.of(ChatMessage.user("anything")));
 
         assertThat(result.isEmpty()).isTrue();
+        assertThat(output.getAll())
+                .contains("Failed to parse fact-extraction JSON", "errorType=", "responseChars=")
+                .doesNotContain(sentinel);
+    }
+
+    @Test
+    void nonArrayFactsLogsOnlySafeMetadata(CapturedOutput output) {
+        String sentinel = "fact-field-private-sentinel";
+        String raw = "{\"facts\":\"" + sentinel + "\"}";
+        when(chatProvider.chat(any(ChatRequest.class))).thenReturn(raw);
+
+        FactExtractionResult result = svc.extract(List.of(ChatMessage.user("anything")));
+
+        assertThat(result.isEmpty()).isTrue();
+        assertThat(output.getAll())
+                .contains("nodeType=STRING", "responseChars=" + raw.length())
+                .doesNotContain(sentinel);
     }
 
     @Test

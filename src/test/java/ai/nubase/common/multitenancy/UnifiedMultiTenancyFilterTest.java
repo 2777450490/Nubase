@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 
 class UnifiedMultiTenancyFilterTest {
 
-    private static final String JWT_SECRET = "0123456789abcdef0123456789abcdef";
+    private static final String JWT_SECRET = "test-secret-".repeat(4);
 
     @AfterEach
     void tearDown() {
@@ -39,12 +39,11 @@ class UnifiedMultiTenancyFilterTest {
         var routingDataSource = mock(RoutingDataSource.class);
         when(repository.findByAppCode("appabc")).thenReturn(databaseConfig("appabc"));
 
-        var filter = filter(repository, routingDataSource);
         var request = requestWithProjectRef("appabc", "appabc");
         var response = new MockHttpServletResponse();
-        var chain = new MockFilterChain();
 
-        filter.doFilter(request, response, chain);
+        filter(repository, routingDataSource)
+                .doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(MultiTenancyContext.getAppCode()).isNull();
@@ -52,14 +51,14 @@ class UnifiedMultiTenancyFilterTest {
 
     @Test
     void skipsAppWorkerDeployPathSoPlatformAdminFilterCanAuthenticateIt() throws Exception {
-        var repository = mock(DatabaseConfigRepository.class);
-        var filter = filter(repository, mock(RoutingDataSource.class));
-        var request = new MockHttpServletRequest("POST", "/deployments/platform/v1/app-workers/deploy");
+        var request = new MockHttpServletRequest(
+                "POST",
+                "/deployments/platform/v1/app-workers/deploy");
         request.setServerName("nubase.example");
         var response = new MockHttpServletResponse();
-        var chain = new MockFilterChain();
 
-        filter.doFilter(request, response, chain);
+        filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class))
+                .doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(MultiTenancyContext.getAppCode()).isNull();
@@ -67,43 +66,68 @@ class UnifiedMultiTenancyFilterTest {
 
     @Test
     void skipsAppWorkerReadPathSoPlainPlatformKeyIsNotParsedAsTenantJwt() throws Exception {
-        var repository = mock(DatabaseConfigRepository.class);
-        var filter = filter(repository, mock(RoutingDataSource.class));
-        var request = new MockHttpServletRequest("GET", "/deployments/platform/v1/app-workers/appabc");
-        request.addHeader("Authorization", "Bearer 7b8db4866db5ff41a36807bb679b08edc29287c340d07f130755312437416bc2");
+        var request = new MockHttpServletRequest(
+                "GET",
+                "/deployments/platform/v1/app-workers/appabc");
+        request.addHeader(
+                "Authorization",
+                "Bearer test-platform-key");
         request.setServerName("nubase.example");
         var response = new MockHttpServletResponse();
-        var chain = new MockFilterChain();
 
-        filter.doFilter(request, response, chain);
+        filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class))
+                .doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(MultiTenancyContext.getAppCode()).isNull();
     }
 
     @Test
+    void skipsOnlyExactPublicModelCatalogPath() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/v1/models/public");
+        var response = new MockHttpServletResponse();
+
+        filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class))
+                .doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void doesNotSkipPathsBelowPublicModelCatalog() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/v1/models/public/private");
+        request.setServerName("nubase.example");
+        var response = new MockHttpServletResponse();
+
+        filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class))
+                .doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("Apikey header is missing");
+    }
+
+    @Test
     void rejectsProjectRefHeaderWhenItDoesNotMatchApikeyRef() throws Exception {
-        var filter = filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class));
         var request = requestWithProjectRef("appabc", "otherapp");
         var response = new MockHttpServletResponse();
 
-        filter.doFilter(request, response, new MockFilterChain());
+        filter(mock(DatabaseConfigRepository.class), mock(RoutingDataSource.class))
+                .doFilter(request, response, new MockFilterChain());
 
         assertThat(response.getStatus()).isEqualTo(401);
-        assertThat(response.getContentAsString()).contains("x-nubase-project-ref does not match apikey ref");
+        assertThat(response.getContentAsString())
+                .contains("x-nubase-project-ref does not match apikey ref");
     }
 
     private UnifiedMultiTenancyFilter filter(
             DatabaseConfigRepository repository,
-            RoutingDataSource routingDataSource
-    ) {
+            RoutingDataSource routingDataSource) {
         return new UnifiedMultiTenancyFilter(
                 repository,
                 routingDataSource,
                 mock(JwtSecretService.class),
                 mock(OAuthStateService.class),
-                mock(UserRepository.class)
-        );
+                mock(UserRepository.class));
     }
 
     private MockHttpServletRequest requestWithProjectRef(String tokenAppCode, String projectRef) {
@@ -121,7 +145,7 @@ class UnifiedMultiTenancyFilterTest {
                 .schemaName("public")
                 .jwtSecret(JWT_SECRET)
                 .enabled(true)
-                .initStatus(DatabaseInitStatus.PENDING_INIT.name())
+                .initStatus(DatabaseInitStatus.INITIALIZED.name())
                 .dbSchemas(List.of("public"))
                 .authenticatedToken(jwt(appCode))
                 .build();

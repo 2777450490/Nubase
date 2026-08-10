@@ -31,6 +31,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for buckets
+DROP TRIGGER IF EXISTS update_buckets_updated_at ON storage.buckets;
 CREATE TRIGGER update_buckets_updated_at
     BEFORE UPDATE
     ON storage.buckets
@@ -73,6 +74,7 @@ CREATE TABLE IF NOT EXISTS storage.objects
 );
 
 -- Create trigger for objects
+DROP TRIGGER IF EXISTS update_objects_updated_at ON storage.objects;
 CREATE TRIGGER update_objects_updated_at
     BEFORE UPDATE
     ON storage.objects
@@ -142,12 +144,14 @@ ALTER TABLE storage.buckets_vectors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.vector_indexes ENABLE ROW LEVEL SECURITY;
 
 -- Create triggers for auto-updating updated_at
+DROP TRIGGER IF EXISTS update_buckets_vectors_updated_at ON storage.buckets_vectors;
 CREATE TRIGGER update_buckets_vectors_updated_at
     BEFORE UPDATE
     ON storage.buckets_vectors
     FOR EACH ROW
 EXECUTE FUNCTION storage.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_vector_indexes_updated_at ON storage.vector_indexes;
 CREATE TRIGGER update_vector_indexes_updated_at
     BEFORE UPDATE
     ON storage.vector_indexes

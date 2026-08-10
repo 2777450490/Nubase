@@ -1,11 +1,12 @@
 package ai.nubase.postgrest.multidb;
 
+import ai.nubase.common.enums.DatabaseInitStatus;
+import ai.nubase.postgrest.config.PostgRESTConfig;
 import com.zaxxer.hikari.HikariConfig;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import ai.nubase.postgrest.config.PostgRESTConfig;
 
 import java.time.Instant;
 import java.util.List;
@@ -250,12 +251,18 @@ public class DatabaseConfig {
     }
 
     /**
-     * Check if this database is enabled and healthy
+     * Check whether this database may serve tenant traffic.
      *
-     * @return true if enabled and healthy
+     * <p>A project remains enabled while provisioning so it stays visible in management APIs, but
+     * it must not serve traffic until initialization succeeds. A null status remains available for
+     * legacy rows created before initialization tracking was introduced.
+     *
+     * @return true when enabled and either initialized or a legacy row without a status
      */
     public boolean isAvailable() {
-        return enabled;
+        return Boolean.TRUE.equals(enabled)
+                && (initStatus == null
+                || DatabaseInitStatus.INITIALIZED.name().equals(initStatus));
     }
 
     @Override

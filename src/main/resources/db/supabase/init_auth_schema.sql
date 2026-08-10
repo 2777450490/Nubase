@@ -74,6 +74,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger
+DROP TRIGGER IF EXISTS update_users_updated_at ON auth.users;
 CREATE TRIGGER update_users_updated_at
     BEFORE UPDATE
     ON auth.users
@@ -137,6 +138,7 @@ CREATE TABLE IF NOT EXISTS auth.sessions
 );
 
 -- Create trigger
+DROP TRIGGER IF EXISTS update_sessions_updated_at ON auth.sessions;
 CREATE TRIGGER update_sessions_updated_at
     BEFORE UPDATE
     ON auth.sessions
@@ -174,6 +176,7 @@ CREATE TABLE IF NOT EXISTS auth.refresh_tokens
 );
 
 -- Create trigger
+DROP TRIGGER IF EXISTS update_refresh_tokens_updated_at ON auth.refresh_tokens;
 CREATE TRIGGER update_refresh_tokens_updated_at
     BEFORE UPDATE
     ON auth.refresh_tokens
@@ -213,6 +216,7 @@ CREATE TABLE IF NOT EXISTS auth.identities
 );
 
 -- Create trigger
+DROP TRIGGER IF EXISTS update_identities_updated_at ON auth.identities;
 CREATE TRIGGER update_identities_updated_at
     BEFORE UPDATE
     ON auth.identities
@@ -266,7 +270,7 @@ COMMENT ON INDEX auth.identities_user_id_idx IS 'Fast lookup of user identities'
 -- ============================================================================
 
 -- A factor is an enrolled authentication method (TOTP authenticator app or phone/SMS).
-CREATE TABLE auth.mfa_factors
+CREATE TABLE IF NOT EXISTS auth.mfa_factors
 (
     id                 UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     user_id            UUID         NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
@@ -280,19 +284,20 @@ CREATE TABLE auth.mfa_factors
     last_challenged_at TIMESTAMP WITH TIME ZONE
 );
 
+DROP TRIGGER IF EXISTS update_mfa_factors_updated_at ON auth.mfa_factors;
 CREATE TRIGGER update_mfa_factors_updated_at
     BEFORE UPDATE ON auth.mfa_factors
     FOR EACH ROW EXECUTE FUNCTION auth.update_updated_at_column();
 
-CREATE INDEX mfa_factors_user_id_idx ON auth.mfa_factors(user_id);
-CREATE UNIQUE INDEX mfa_factors_user_friendly_name_idx
+CREATE INDEX IF NOT EXISTS mfa_factors_user_id_idx ON auth.mfa_factors(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS mfa_factors_user_friendly_name_idx
     ON auth.mfa_factors(user_id, friendly_name) WHERE friendly_name IS NOT NULL;
 
 COMMENT ON TABLE auth.mfa_factors IS 'Enrolled MFA factors (TOTP / phone)';
 ALTER TABLE auth.mfa_factors ENABLE ROW LEVEL SECURITY;
 
 -- A challenge is a single verification attempt against a factor.
-CREATE TABLE auth.mfa_challenges
+CREATE TABLE IF NOT EXISTS auth.mfa_challenges
 (
     id          UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     factor_id   UUID NOT NULL REFERENCES auth.mfa_factors (id) ON DELETE CASCADE,
@@ -302,12 +307,12 @@ CREATE TABLE auth.mfa_challenges
     otp_code    VARCHAR(10)                                  -- only for phone factors
 );
 
-CREATE INDEX mfa_challenges_factor_id_idx ON auth.mfa_challenges(factor_id);
+CREATE INDEX IF NOT EXISTS mfa_challenges_factor_id_idx ON auth.mfa_challenges(factor_id);
 COMMENT ON TABLE auth.mfa_challenges IS 'MFA verification challenges';
 ALTER TABLE auth.mfa_challenges ENABLE ROW LEVEL SECURITY;
 
 -- AMR (Authentication Methods References) records which methods backed a session.
-CREATE TABLE auth.mfa_amr_claims
+CREATE TABLE IF NOT EXISTS auth.mfa_amr_claims
 (
     id                    UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     session_id            UUID NOT NULL REFERENCES auth.sessions (id) ON DELETE CASCADE,
@@ -317,14 +322,14 @@ CREATE TABLE auth.mfa_amr_claims
     CONSTRAINT mfa_amr_claims_session_method_unique UNIQUE (session_id, authentication_method)
 );
 
-CREATE INDEX mfa_amr_claims_session_id_idx ON auth.mfa_amr_claims(session_id);
+CREATE INDEX IF NOT EXISTS mfa_amr_claims_session_id_idx ON auth.mfa_amr_claims(session_id);
 COMMENT ON TABLE auth.mfa_amr_claims IS 'Authentication methods references per session';
 ALTER TABLE auth.mfa_amr_claims ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
 -- One-time tokens (magic link / email-OTP / phone-OTP / reauthentication)
 -- ============================================================================
-CREATE TABLE auth.one_time_tokens
+CREATE TABLE IF NOT EXISTS auth.one_time_tokens
 (
     id            UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     user_id       UUID         NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
@@ -339,16 +344,16 @@ CREATE TABLE auth.one_time_tokens
     updated_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX one_time_tokens_user_id_idx ON auth.one_time_tokens(user_id);
-CREATE INDEX one_time_tokens_token_hash_idx ON auth.one_time_tokens(token_hash);
-CREATE INDEX one_time_tokens_relates_to_idx ON auth.one_time_tokens(relates_to);
+CREATE INDEX IF NOT EXISTS one_time_tokens_user_id_idx ON auth.one_time_tokens(user_id);
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_idx ON auth.one_time_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_idx ON auth.one_time_tokens(relates_to);
 COMMENT ON TABLE auth.one_time_tokens IS 'Single-use tokens for passwordless / reauthentication flows';
 ALTER TABLE auth.one_time_tokens ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
 -- Audit log (Supabase GoTrue parity)
 -- ============================================================================
-CREATE TABLE auth.audit_log_entries
+CREATE TABLE IF NOT EXISTS auth.audit_log_entries
 (
     id          UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     instance_id UUID,
@@ -357,14 +362,14 @@ CREATE TABLE auth.audit_log_entries
     ip_address  VARCHAR(64)              DEFAULT ''
 );
 
-CREATE INDEX audit_log_entries_created_at_idx ON auth.audit_log_entries(created_at);
+CREATE INDEX IF NOT EXISTS audit_log_entries_created_at_idx ON auth.audit_log_entries(created_at);
 COMMENT ON TABLE auth.audit_log_entries IS 'Auth audit trail (logins, signups, MFA, recovery, etc.)';
 ALTER TABLE auth.audit_log_entries ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
 -- PKCE flow state (grant_type=pkce) — also used by OAuth and SAML SSO
 -- ============================================================================
-CREATE TABLE auth.flow_state
+CREATE TABLE IF NOT EXISTS auth.flow_state
 (
     id                     UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     user_id                UUID REFERENCES auth.users (id) ON DELETE CASCADE,
@@ -379,8 +384,8 @@ CREATE TABLE auth.flow_state
     CONSTRAINT flow_state_auth_code_unique UNIQUE (auth_code)
 );
 
-CREATE INDEX flow_state_created_at_idx ON auth.flow_state(created_at);
-CREATE INDEX flow_state_user_id_idx ON auth.flow_state(user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS flow_state_created_at_idx ON auth.flow_state(created_at);
+CREATE INDEX IF NOT EXISTS flow_state_user_id_idx ON auth.flow_state(user_id) WHERE user_id IS NOT NULL;
 COMMENT ON TABLE auth.flow_state IS 'PKCE / SSO flow state — exchanges an auth_code for a session';
 ALTER TABLE auth.flow_state ENABLE ROW LEVEL SECURITY;
 
@@ -389,7 +394,7 @@ ALTER TABLE auth.flow_state ENABLE ROW LEVEL SECURITY;
 -- ============================================================================
 
 -- An SSO provider groups one IdP with the email domains it authenticates.
-CREATE TABLE auth.sso_providers
+CREATE TABLE IF NOT EXISTS auth.sso_providers
 (
     id          UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     resource_id VARCHAR(255),            -- caller-supplied external id
@@ -401,7 +406,7 @@ COMMENT ON TABLE auth.sso_providers IS 'SSO (SAML) identity providers';
 ALTER TABLE auth.sso_providers ENABLE ROW LEVEL SECURITY;
 
 -- Email domains routed to an SSO provider.
-CREATE TABLE auth.sso_domains
+CREATE TABLE IF NOT EXISTS auth.sso_domains
 (
     id              UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     sso_provider_id UUID NOT NULL REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
@@ -409,13 +414,13 @@ CREATE TABLE auth.sso_domains
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE UNIQUE INDEX sso_domains_domain_idx ON auth.sso_domains(LOWER(domain));
-CREATE INDEX sso_domains_provider_id_idx ON auth.sso_domains(sso_provider_id);
+CREATE UNIQUE INDEX IF NOT EXISTS sso_domains_domain_idx ON auth.sso_domains(LOWER(domain));
+CREATE INDEX IF NOT EXISTS sso_domains_provider_id_idx ON auth.sso_domains(sso_provider_id);
 COMMENT ON TABLE auth.sso_domains IS 'Email domains mapped to an SSO provider';
 ALTER TABLE auth.sso_domains ENABLE ROW LEVEL SECURITY;
 
 -- SAML-specific configuration for an SSO provider (the IdP metadata).
-CREATE TABLE auth.saml_providers
+CREATE TABLE IF NOT EXISTS auth.saml_providers
 (
     id                UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     sso_provider_id   UUID NOT NULL REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
@@ -430,12 +435,12 @@ CREATE TABLE auth.saml_providers
     updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT saml_providers_entity_id_unique UNIQUE (entity_id)
 );
-CREATE INDEX saml_providers_sso_provider_id_idx ON auth.saml_providers(sso_provider_id);
+CREATE INDEX IF NOT EXISTS saml_providers_sso_provider_id_idx ON auth.saml_providers(sso_provider_id);
 COMMENT ON TABLE auth.saml_providers IS 'SAML IdP configuration per SSO provider';
 ALTER TABLE auth.saml_providers ENABLE ROW LEVEL SECURITY;
 
 -- Outstanding SAML AuthnRequests (relay state) awaiting an IdP response.
-CREATE TABLE auth.saml_relay_states
+CREATE TABLE IF NOT EXISTS auth.saml_relay_states
 (
     id              UUID PRIMARY KEY         DEFAULT gen_random_uuid(),
     sso_provider_id UUID NOT NULL REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
@@ -446,7 +451,7 @@ CREATE TABLE auth.saml_relay_states
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE INDEX saml_relay_states_request_id_idx ON auth.saml_relay_states(request_id);
-CREATE INDEX saml_relay_states_provider_id_idx ON auth.saml_relay_states(sso_provider_id);
+CREATE INDEX IF NOT EXISTS saml_relay_states_request_id_idx ON auth.saml_relay_states(request_id);
+CREATE INDEX IF NOT EXISTS saml_relay_states_provider_id_idx ON auth.saml_relay_states(sso_provider_id);
 COMMENT ON TABLE auth.saml_relay_states IS 'In-flight SAML AuthnRequests';
 ALTER TABLE auth.saml_relay_states ENABLE ROW LEVEL SECURITY;

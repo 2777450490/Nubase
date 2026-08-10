@@ -48,6 +48,7 @@ import java.util.Map;
 import ai.nubase.auth.exception.EmailAlreadyExistsException;
 import ai.nubase.auth.exception.UserNotFoundException;
 import ai.nubase.common.context.MultiTenancyContext;
+import ai.nubase.common.enums.DatabaseInitStatus;
 import ai.nubase.postgrest.multidb.DatabaseConfig;
 import ai.nubase.postgrest.multidb.ProjectListItem;
 import cn.hutool.json.JSONUtil;
@@ -726,7 +727,8 @@ public class AdminController {
                 config.getInitStatus(),
                 config.getInitMessage(),
                 config.getEnabled(),
-                projectProvisioningService.isRunning(config.getDbKey()),
+                DatabaseInitStatus.INITIALIZING.name().equalsIgnoreCase(config.getInitStatus())
+                        || projectProvisioningService.isRunning(config.getDbKey()),
                 config.getInitStartedAt(),
                 config.getInitCompletedAt()));
     }

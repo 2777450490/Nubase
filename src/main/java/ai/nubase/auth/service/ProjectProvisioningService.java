@@ -57,11 +57,11 @@ public class ProjectProvisioningService {
             if (response.isSuccess()) {
                 recordOwnership(ownerId, dbKey);
             } else {
-                log.warn("Asynchronous project provisioning failed for dbKey={}: {}",
-                        dbKey, response.getMessage());
+                log.warn("Asynchronous project provisioning failed for dbKey={}", dbKey);
             }
         } catch (Exception e) {
-            log.error("Unexpected asynchronous project provisioning failure for dbKey={}", dbKey, e);
+            log.error("Unexpected asynchronous project provisioning failure for dbKey={}, errorType={}",
+                    dbKey, errorType(e));
         } finally {
             inFlight.remove(dbKey);
         }
@@ -71,11 +71,17 @@ public class ProjectProvisioningService {
         try {
             projectOwnershipService.recordOwnership(ownerId, dbKey, null, null);
         } catch (DataIntegrityViolationException race) {
-            log.warn("Ownership write raced for dbKey={}; retrying once: {}", dbKey, race.getMessage());
+            log.warn("Ownership write raced for dbKey={}; retrying once", dbKey);
             projectOwnershipService.recordOwnership(ownerId, dbKey, null, null);
         } catch (RuntimeException e) {
-            log.error("Project {} initialized but ownership refresh failed", dbKey, e);
+            log.error("Project {} initialized but ownership refresh failed: errorType={}",
+                    dbKey, errorType(e));
         }
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isBlank() ? "Exception" : simpleName;
     }
 
     public record Submission(SubmissionState state) {

@@ -401,6 +401,7 @@ NOTIFY pgrst, 'reload schema';
 END;
 $$ LANGUAGE plpgsql;
 
+DROP EVENT TRIGGER IF EXISTS pgrst_watch;
 CREATE EVENT TRIGGER pgrst_watch
 ON ddl_command_end
 EXECUTE PROCEDURE pgrst_watch();

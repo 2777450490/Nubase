@@ -62,6 +62,7 @@ public class DatabaseInitService {
     private final DatabaseConfigRepository databaseConfigRepository;
     private final EncryptionService encryptionService;
     private final DefaultGatewayKeyProvisioner defaultGatewayKeyProvisioner;
+    private final ProjectProvisioningLeaseService projectProvisioningLeaseService;
 
     private final JdbcTemplate metadataJdbcTemplate;
 
@@ -69,10 +70,12 @@ public class DatabaseInitService {
             DatabaseConfigRepository databaseConfigRepository,
             EncryptionService encryptionService,
             DefaultGatewayKeyProvisioner defaultGatewayKeyProvisioner,
+            ProjectProvisioningLeaseService projectProvisioningLeaseService,
             @Qualifier("metadataJdbcTemplate") JdbcTemplate metadataJdbcTemplate) {
         this.databaseConfigRepository = databaseConfigRepository;
         this.encryptionService = encryptionService;
         this.defaultGatewayKeyProvisioner = defaultGatewayKeyProvisioner;
+        this.projectProvisioningLeaseService = projectProvisioningLeaseService;
         this.metadataJdbcTemplate = metadataJdbcTemplate;
     }
 
@@ -215,7 +218,7 @@ public class DatabaseInitService {
             // Set the initialization status
             databaseConfig.setInitStatus(DatabaseInitStatus.PENDING_INIT.name());
             databaseConfig.setInitMessage("Configuration created, waiting for physical database initialization");
-            databaseConfig.setEnabled(true); // Disabled prior to initialization
+            databaseConfig.setEnabled(false);
 
             // Save the configuration to database_configs
             databaseConfigRepository.save(databaseConfig);
@@ -235,11 +238,13 @@ public class DatabaseInitService {
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Failed to create database configuration: {}", request.getAppCode(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to create database configuration: appCode={}, errorType={}",
+                    request.getAppCode(), errorType);
 
             return InitDatabaseResponse.error(
-                    "Database configuration creation failed: " + e.getMessage(),
-                    getDetailedErrorMessage(e, executedSteps),
+                    "Database configuration creation failed (" + errorType + ")",
+                    getSafeErrorDetails(e, executedSteps),
                     executionTime
             );
         }
@@ -259,6 +264,7 @@ public class DatabaseInitService {
         List<String> executedSteps = new ArrayList<>();
         HikariDataSource newDatabaseDataSource = null;
         HikariDataSource newDatabaseSuperDataSource = null;
+        ProjectProvisioningLeaseService.LeaseHandle initializationLease = null;
 
         try {
             // 1. Fetch the configuration
@@ -279,21 +285,34 @@ public class DatabaseInitService {
                         System.currentTimeMillis() - startTime
                 );
             }
+            Optional<ProjectProvisioningLeaseService.LeaseHandle> claimedLease =
+                    projectProvisioningLeaseService.tryAcquire(dbKey);
+            if (claimedLease.isEmpty()) {
+                DatabaseConfig latestConfig = databaseConfigRepository.findByDbKey(dbKey);
+                if (latestConfig != null
+                        && DatabaseInitStatus.INITIALIZED.name().equals(latestConfig.getInitStatus())) {
+                    return InitDatabaseResponse.success(
+                            latestConfig.getJwtSecret(),
+                            latestConfig.getServiceRoleToken(),
+                            latestConfig.getAuthenticatedToken(),
+                            latestConfig.getInitStatus(),
+                            executedSteps,
+                            System.currentTimeMillis() - startTime);
+                }
+                log.info("Database initialization is already claimed by another worker for dbKey={}", dbKey);
+                return InitDatabaseResponse.error(
+                        "Database initialization is already in progress",
+                        "Another worker owns the active provisioning lease for dbKey: " + dbKey,
+                        System.currentTimeMillis() - startTime);
+            }
+            initializationLease = claimedLease.orElseThrow();
             boolean recoveringExistingResources =
-                    DatabaseInitStatus.INIT_FAILED.name().equals(databaseConfig.getInitStatus())
-                            || DatabaseInitStatus.INITIALIZING.name().equals(databaseConfig.getInitStatus());
+                    DatabaseInitStatus.INIT_FAILED.name().equals(initializationLease.previousStatus())
+                            || DatabaseInitStatus.INITIALIZING.name().equals(
+                            initializationLease.previousStatus());
 
             log.info("Starting physical database initialization for dbKey={}", dbKey);
-
-            // 2. Update status to initializing
-            databaseConfigRepository.updateInitStatus(
-                    dbKey,
-                    DatabaseInitStatus.INITIALIZING.name(),
-                    "Physical database initialization started",
-                    Instant.now(),
-                    null
-            );
-            executedSteps.add("Updated status to initializing");
+            executedSteps.add("Claimed database initialization lease");
 
             // Decrypt the password
             String dbPassword = encryptionService.decrypt(databaseConfig.getDbPasswordEncrypted());
@@ -313,6 +332,7 @@ public class DatabaseInitService {
             String anonRole = Role.ANON.getValue();
 
             // 3. Create the database and user
+            initializationLease.renewOrThrow();
             createDatabaseAndUser(
                     dbName,
                     dbUser,
@@ -322,6 +342,7 @@ public class DatabaseInitService {
             );
 
             // 4. Connect to the new database and initialize it
+            initializationLease.renewOrThrow();
             newDatabaseSuperDataSource = createDataSource(jdbcUrl, metadataUsername, metadataPassword);
             initSuperExtensions(newDatabaseSuperDataSource);
 
@@ -329,31 +350,21 @@ public class DatabaseInitService {
             configurePublicSchema(newDatabaseSuperDataSource, dbUser);
             executedSteps.add("Configured public schema ownership");
 
+            initializationLease.renewOrThrow();
             newDatabaseDataSource = createDataSource(jdbcUrl, dbUser, dbPassword);
             initializeSupabaseSchemas(newDatabaseDataSource, serviceRole, authenticatedRole, anonRole, dbUser);
 
             // Check and create any missing roles
+            initializationLease.renewOrThrow();
             checkAndCreateMissingRoles(newDatabaseSuperDataSource, serviceRole, authenticatedRole, anonRole, executedSteps);
 
             initializeSupabaseRoles(newDatabaseSuperDataSource, serviceRole, authenticatedRole, anonRole, dbUser);
 
-            // 5. Update status to initialized
-            databaseConfigRepository.updateInitStatus(
-                    dbKey,
-                    DatabaseInitStatus.INITIALIZED.name(),
-                    "Physical database initialized successfully",
-                    null,
-                    Instant.now()
-            );
-            databaseConfigRepository.updateEnabled(dbKey, true); // Enable the configuration
-            executedSteps.add("Updated status to initialized and enabled configuration");
-
-            if (aiGatewayEnabled) {
-                defaultGatewayKeyProvisioner.provision(
-                        newDatabaseDataSource,
-                        databaseConfig.getServiceRoleToken());
-                executedSteps.add("Registered service role key as the default AI Gateway key");
-            }
+            publishInitializedDatabase(
+                    newDatabaseDataSource,
+                    databaseConfig,
+                    initializationLease,
+                    executedSteps);
 
             long executionTime = System.currentTimeMillis() - startTime;
             log.info("Physical database initialization completed successfully in {}ms for dbKey={}", executionTime, dbKey);
@@ -369,43 +380,71 @@ public class DatabaseInitService {
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            log.error("Failed to initialize physical database: {}", dbKey, e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to initialize physical database: dbKey={}, errorType={}",
+                    dbKey, errorType);
 
-            // Update status to init_failed
-            try {
-                databaseConfigRepository.updateInitStatus(
-                        dbKey,
-                        DatabaseInitStatus.INIT_FAILED.name(),
-                        "Physical database initialization failed: " + e.getMessage(),
-                        null,
-                        Instant.now()
-                );
-            } catch (Exception updateEx) {
-                log.error("Failed to update init status to init_failed: {}", updateEx.getMessage());
+            if (initializationLease != null) {
+                try {
+                    boolean failureRecorded = initializationLease.fail(
+                            "Physical database initialization failed ("
+                                    + errorType
+                                    + ")");
+                    if (!failureRecorded) {
+                        log.warn("Skipped stale initialization failure update for dbKey={}", dbKey);
+                    }
+                } catch (Exception updateEx) {
+                    log.error("Failed to update init status to init_failed: errorType={}",
+                            updateEx.getClass().getSimpleName());
+                }
             }
 
             return InitDatabaseResponse.error(
-                    "Physical database initialization failed: " + e.getMessage(),
-                    getDetailedErrorMessage(e, executedSteps),
+                    "Physical database initialization failed (" + errorType + ")",
+                    getSafeErrorDetails(e, executedSteps),
                     executionTime
             );
         } finally {
+            if (initializationLease != null) {
+                initializationLease.close();
+            }
             // Clean up datasources
             if (newDatabaseDataSource != null) {
                 try {
                     newDatabaseDataSource.close();
                 } catch (Exception ex) {
-                    log.warn("Failed to close newDatabaseDataSource: {}", ex.getMessage());
+                    log.warn("Failed to close newDatabaseDataSource: errorType={}", safeExceptionType(ex));
                 }
             }
             if (newDatabaseSuperDataSource != null) {
                 try {
                     newDatabaseSuperDataSource.close();
                 } catch (Exception ex) {
-                    log.warn("Failed to close newDatabaseSuperDataSource: {}", ex.getMessage());
+                    log.warn("Failed to close newDatabaseSuperDataSource: errorType={}", safeExceptionType(ex));
                 }
             }
         }
+    }
+
+    /** Provision dependent tenant state before atomically publishing the project as available. */
+    void publishInitializedDatabase(
+            DataSource tenantDataSource,
+            DatabaseConfig databaseConfig,
+            ProjectProvisioningLeaseService.LeaseHandle initializationLease,
+            List<String> executedSteps) {
+        initializationLease.renewOrThrow();
+        if (aiGatewayEnabled) {
+            defaultGatewayKeyProvisioner.provision(
+                    tenantDataSource,
+                    databaseConfig.getServiceRoleToken());
+            executedSteps.add("Registered service role key as the default AI Gateway key");
+        }
+
+        if (!initializationLease.complete("Physical database initialized successfully")) {
+            throw new ProjectProvisioningLeaseService.LeaseLostException(
+                    databaseConfig.getDbKey());
+        }
+        executedSteps.add("Updated status to initialized and enabled configuration");
     }
 
     /**
@@ -511,7 +550,7 @@ public class DatabaseInitService {
             }
 
         } catch (Exception e) {
-            log.error("Failed to check and create missing roles: {}", e.getMessage(), e);
+            log.error("Failed to check and create missing roles: errorType={}", safeExceptionType(e));
         }
     }
 
@@ -574,7 +613,7 @@ public class DatabaseInitService {
                             "Failed to create pgvector extension on tenant '" + dbKey
                                     + "'. Install pgvector on the Postgres server "
                                     + "(e.g. use the pgvector/pgvector image) before retrying "
-                                    + "the mem-schema migration. Underlying error: " + e.getMessage(), e);
+                                    + "the mem-schema migration.");
                 }
             }
 
@@ -619,8 +658,9 @@ public class DatabaseInitService {
             return executedSteps;
 
         } catch (Exception e) {
-            log.error("Mem-schema migration failed for {}: {}", dbKey, e.getMessage(), e);
-            throw new RuntimeException("Mem-schema migration failed: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Mem-schema migration failed for {}: errorType={}", dbKey, errorType);
+            throw new RuntimeException("Mem-schema migration failed (" + errorType + ")");
         } finally {
             if (superDs != null) {
                 try { superDs.close(); } catch (Exception ignore) {}
@@ -647,7 +687,7 @@ public class DatabaseInitService {
                 initializeMemSchemaForExistingTenant(cfg.getDbKey());
                 results.put(cfg.getDbKey(), "OK");
             } catch (Exception e) {
-                results.put(cfg.getDbKey(), "ERROR: " + e.getMessage());
+                results.put(cfg.getDbKey(), "ERROR: " + safeExceptionType(e));
             }
         }
         return results;
@@ -718,8 +758,9 @@ public class DatabaseInitService {
 
             return executedSteps;
         } catch (Exception e) {
-            log.error("Assets-schema migration failed for {}: {}", dbKey, e.getMessage(), e);
-            throw new RuntimeException("Assets-schema migration failed: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Assets-schema migration failed for {}: errorType={}", dbKey, errorType);
+            throw new RuntimeException("Assets-schema migration failed (" + errorType + ")");
         } finally {
             if (superDs != null) {
                 try { superDs.close(); } catch (Exception ignore) {}
@@ -746,7 +787,7 @@ public class DatabaseInitService {
                 initializeAssetsSchemaForExistingTenant(cfg.getDbKey());
                 results.put(cfg.getDbKey(), "OK");
             } catch (Exception e) {
-                results.put(cfg.getDbKey(), "ERROR: " + e.getMessage());
+                results.put(cfg.getDbKey(), "ERROR: " + safeExceptionType(e));
             }
         }
         return results;
@@ -760,8 +801,9 @@ public class DatabaseInitService {
             executeSqlScript(stmt, rolesSql);
             log.info("Created roles and granted permissions");
         } catch (SQLException | IOException e) {
-            log.error("Failed to initialize Supabase schemas: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to initialize Supabase schemas: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to initialize Supabase schemas: errorType={}", errorType);
+            throw new RuntimeException("Failed to initialize Supabase schemas (" + errorType + ")");
         }
     }
 
@@ -784,15 +826,15 @@ public class DatabaseInitService {
                     throw new RuntimeException(
                             "Failed to create pgvector extension (required because nubase.mem.enabled=true). "
                                     + "Install pgvector on the Postgres server "
-                                    + "(e.g. use the pgvector/pgvector image), or set nubase.mem.enabled=false. "
-                                    + "Underlying error: " + ex.getMessage(), ex);
+                                    + "(e.g. use the pgvector/pgvector image), or set nubase.mem.enabled=false.");
                 }
             } else {
                 log.info("Skipping pgvector extension — nubase.mem.enabled=false");
             }
         } catch (SQLException e) {
-            log.error("Failed to initialize extensions in new database: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to initialize extensions in new database: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to initialize extensions in new database: errorType={}", errorType);
+            throw new RuntimeException("Failed to initialize extensions in new database (" + errorType + ")");
         }
     }
 
@@ -808,8 +850,9 @@ public class DatabaseInitService {
             stmt.execute(alterSchemaSql);
             log.info("Set public schema owner to: {}", dbUser);
         } catch (SQLException e) {
-            log.error("Failed to configure public schema: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to configure public schema: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to configure public schema: errorType={}", errorType);
+            throw new RuntimeException("Failed to configure public schema (" + errorType + ")");
         }
     }
 
@@ -909,8 +952,12 @@ public class DatabaseInitService {
             executedSteps.add("Restricted CONNECT on database " + dbName + " to " + dbUser + " (revoked PUBLIC)");
 
         } catch (Exception e) {
-            log.error("Failed to create database and user: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to create database and user: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            // Spring data-access exceptions may include the full SQL statement. This path embeds
+            // the generated database password, so neither the exception message nor cause may
+            // cross the provisioning boundary.
+            log.error("Failed to create database and user: errorType={}", errorType);
+            throw new RuntimeException("Failed to create database and user (" + errorType + ")");
         }
     }
 
@@ -989,8 +1036,9 @@ public class DatabaseInitService {
             }
 
         } catch (SQLException | IOException e) {
-            log.error("Failed to initialize Supabase schemas: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to initialize Supabase schemas: " + e.getMessage(), e);
+            String errorType = safeExceptionType(e);
+            log.error("Failed to initialize Supabase schemas: errorType={}", errorType);
+            throw new RuntimeException("Failed to initialize Supabase schemas (" + errorType + ")");
         }
     }
 
@@ -1162,9 +1210,13 @@ public class DatabaseInitService {
             }
             log.debug("Executed {} SQL statements successfully", executedCount);
         } catch (SQLException e) {
-            log.error("Failed to execute SQL statement (executed {}/{}): {}",
-                    executedCount, statements.size(), e.getMessage());
-            throw new SQLException("SQL execution failed at statement " + (executedCount + 1) + ": " + e.getMessage(), e);
+            log.error("Failed to execute SQL statement (executed {}/{}): errorType={}, sqlState={}",
+                    executedCount, statements.size(), safeExceptionType(e), e.getSQLState());
+            throw new SQLException(
+                    "SQL execution failed at statement " + (executedCount + 1)
+                            + " (SQLState=" + e.getSQLState() + ")",
+                    e.getSQLState(),
+                    e.getErrorCode());
         }
     }
 
@@ -1300,12 +1352,10 @@ public class DatabaseInitService {
                 .build();
     }
 
-    /**
-     * Build a detailed error message.
-     */
-    private String getDetailedErrorMessage(Exception e, List<String> executedSteps) {
+    /** Build operator-facing error details without propagating driver messages or SQL text. */
+    private String getSafeErrorDetails(Exception e, List<String> executedSteps) {
         StringBuilder details = new StringBuilder();
-        details.append("Error: ").append(e.getMessage()).append("\n\n");
+        details.append("Failure type: ").append(safeExceptionType(e)).append("\n\n");
 
         if (!executedSteps.isEmpty()) {
             details.append("Successfully completed steps:\n");
@@ -1316,10 +1366,14 @@ public class DatabaseInitService {
             details.append("No steps were completed successfully.\n");
         }
 
-        if (e.getCause() != null) {
-            details.append("\nRoot cause: ").append(e.getCause().getMessage());
-        }
-
         return details.toString();
+    }
+
+    private static String safeExceptionType(Throwable error) {
+        if (error == null) {
+            return "Unknown";
+        }
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isBlank() ? "Exception" : simpleName;
     }
 }

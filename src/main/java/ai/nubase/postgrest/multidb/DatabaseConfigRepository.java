@@ -1,5 +1,6 @@
 package ai.nubase.postgrest.multidb;
 
+import ai.nubase.common.enums.DatabaseInitStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
@@ -12,8 +13,12 @@ import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -79,8 +84,9 @@ public class DatabaseConfigRepository {
                 config.setJwtSecretDecrypted(encryptionService.decrypt(config.getJwtSecretEncrypted()));
             }
         } catch (Exception e) {
-            log.error("Failed to decrypt sensitive data for database: {}", dbKey, e);
-            throw new IllegalStateException("Failed to decrypt database configuration", e);
+            log.error("Failed to decrypt sensitive data for database: {}, errorType={}",
+                    dbKey, errorType(e));
+            throw new IllegalStateException("Failed to decrypt database configuration");
         }
 
         log.info("Loaded configuration for database: {}", dbKey);
@@ -124,7 +130,8 @@ public class DatabaseConfigRepository {
                     config.setJwtSecretDecrypted(encryptionService.decrypt(config.getJwtSecretEncrypted()));
                 }
             } catch (Exception e) {
-                log.error("Failed to decrypt sensitive data for database: {}", config.getDbKey(), e);
+                log.error("Failed to decrypt sensitive data for database: {}, errorType={}",
+                        config.getDbKey(), errorType(e));
             }
         });
 
@@ -156,8 +163,9 @@ public class DatabaseConfigRepository {
                 config.setJwtSecretEncrypted(encryptionService.encrypt(config.getJwtSecretEncrypted()));
             }
         } catch (Exception e) {
-            log.error("Failed to encrypt sensitive data for database: {}", config.getDbKey(), e);
-            throw new IllegalStateException("Failed to encrypt database configuration", e);
+            log.error("Failed to encrypt sensitive data for database: {}, errorType={}",
+                    config.getDbKey(), errorType(e));
+            throw new IllegalStateException("Failed to encrypt database configuration");
         }
 
         // Check if exists
@@ -288,36 +296,180 @@ public class DatabaseConfigRepository {
     }
 
     /**
-     * Update database initialization status
+     * Atomically claim physical database initialization for one worker.
      *
-     * @param dbKey          database key
-     * @param initStatus     initialization status ('pending_init', 'initializing', 'initialized', 'init_failed')
-     * @param initMessage    initialization message
-     * @param initStartedAt  initialization start time (null if not starting)
-     * @param initCompletedAt initialization completion time (null if not completed)
+     * <p>The PostgreSQL clock is the sole time source. PostgreSQL also generates the opaque lease
+     * token returned to the caller, so a worker cannot finalize a lease it did not acquire. A
+     * legacy {@code INITIALIZING} row without the V14 lease columns is reclaimable only after its
+     * {@code init_started_at} exceeds the configured timeout.
      */
     @CacheEvict(value = "databaseConfigs", key = "#dbKey")
-    public void updateInitStatus(String dbKey, String initStatus, String initMessage,
-                                 java.time.Instant initStartedAt, java.time.Instant initCompletedAt) {
-        log.info("Updating init status for {}: status={}, message={}", dbKey, initStatus, initMessage);
+    public Optional<InitializationLease> tryStartInitialization(
+            String dbKey, Duration leaseDuration) {
+        long leaseMillis = requirePositiveLeaseMillis(leaseDuration);
+        String sql = """
+                WITH candidate AS (
+                    SELECT db_key, init_status
+                    FROM public.database_configs
+                    WHERE db_key = ?
+                      AND (
+                        init_status IN (?, ?)
+                        OR (
+                          init_status = ?
+                          AND (
+                            init_lease_expires_at < NOW()
+                            OR (
+                              init_lease_expires_at IS NULL
+                              AND (
+                                init_started_at IS NULL
+                                OR init_started_at < NOW()
+                                    - (CAST(? AS BIGINT) * INTERVAL '1 millisecond')
+                              )
+                            )
+                          )
+                        )
+                      )
+                    FOR UPDATE
+                )
+                UPDATE public.database_configs AS config
+                SET init_status = ?,
+                    init_message = ?,
+                    init_started_at = NOW(),
+                    init_completed_at = NULL,
+                    init_lease_token = gen_random_uuid(),
+                    init_lease_expires_at = NOW()
+                        + (CAST(? AS BIGINT) * INTERVAL '1 millisecond'),
+                    init_fence_version = init_fence_version + 1,
+                    enabled = FALSE,
+                    updated_at = NOW()
+                FROM candidate
+                WHERE config.db_key = candidate.db_key
+                RETURNING config.init_lease_token,
+                          candidate.init_status AS previous_init_status,
+                          config.init_started_at,
+                          config.init_lease_expires_at
+                """;
+        List<InitializationLease> claimed = metadataJdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new InitializationLease(
+                        rs.getObject("init_lease_token", UUID.class),
+                        rs.getString("previous_init_status"),
+                        timestampToInstant(rs.getTimestamp("init_started_at")),
+                        timestampToInstant(rs.getTimestamp("init_lease_expires_at"))),
+                dbKey,
+                DatabaseInitStatus.PENDING_INIT.name(),
+                DatabaseInitStatus.INIT_FAILED.name(),
+                DatabaseInitStatus.INITIALIZING.name(),
+                leaseMillis,
+                DatabaseInitStatus.INITIALIZING.name(),
+                "Physical database initialization started",
+                leaseMillis);
+        return claimed.stream().findFirst();
+    }
 
+    /**
+     * Extend an active lease. An expired or superseded holder cannot revive itself.
+     *
+     * <p>{@code init_started_at} is refreshed for rolling compatibility with older nodes whose
+     * stale-lease check only understands that timestamp.
+     */
+    @CacheEvict(value = "databaseConfigs", key = "#dbKey")
+    public boolean renewInitializationLease(
+            String dbKey, UUID leaseToken, Duration leaseDuration) {
+        long leaseMillis = requirePositiveLeaseMillis(leaseDuration);
+        String sql = """
+                UPDATE public.database_configs
+                SET init_lease_expires_at = NOW()
+                        + (CAST(? AS BIGINT) * INTERVAL '1 millisecond'),
+                    init_started_at = NOW(),
+                    updated_at = NOW()
+                WHERE db_key = ?
+                  AND init_status = ?
+                  AND init_lease_token = ?
+                  AND init_lease_expires_at > NOW()
+                """;
+        return metadataJdbcTemplate.update(
+                sql,
+                leaseMillis,
+                dbKey,
+                DatabaseInitStatus.INITIALIZING.name(),
+                leaseToken) == 1;
+    }
+
+    /** Complete initialization only when the caller still owns an unexpired lease. */
+    @CacheEvict(value = "databaseConfigs", key = "#dbKey")
+    public boolean completeInitialization(String dbKey, UUID leaseToken, String initMessage) {
         String sql = """
                 UPDATE public.database_configs
                 SET init_status = ?,
                     init_message = ?,
-                    init_started_at = COALESCE(?, init_started_at),
-                    init_completed_at = ?,
+                    init_completed_at = NOW(),
+                    init_lease_token = NULL,
+                    init_lease_expires_at = NULL,
+                    init_fence_version = init_fence_version + 1,
+                    enabled = TRUE,
                     updated_at = NOW()
                 WHERE db_key = ?
+                  AND init_status = ?
+                  AND init_lease_token = ?
+                  AND init_lease_expires_at > NOW()
                 """;
-
-        metadataJdbcTemplate.update(sql,
-                initStatus,
+        return metadataJdbcTemplate.update(
+                sql,
+                DatabaseInitStatus.INITIALIZED.name(),
                 initMessage,
-                initStartedAt != null ? java.sql.Timestamp.from(initStartedAt) : null,
-                initCompletedAt != null ? java.sql.Timestamp.from(initCompletedAt) : null,
-                dbKey
-        );
+                dbKey,
+                DatabaseInitStatus.INITIALIZING.name(),
+                leaseToken) == 1;
+    }
+
+    /** Record failure only when the caller still owns an unexpired lease. */
+    @CacheEvict(value = "databaseConfigs", key = "#dbKey")
+    public boolean failInitialization(String dbKey, UUID leaseToken, String initMessage) {
+        String sql = """
+                UPDATE public.database_configs
+                SET init_status = ?,
+                    init_message = ?,
+                    init_completed_at = NOW(),
+                    init_lease_token = NULL,
+                    init_lease_expires_at = NULL,
+                    init_fence_version = init_fence_version + 1,
+                    enabled = FALSE,
+                    updated_at = NOW()
+                WHERE db_key = ?
+                  AND init_status = ?
+                  AND init_lease_token = ?
+                  AND init_lease_expires_at > NOW()
+                """;
+        return metadataJdbcTemplate.update(
+                sql,
+                DatabaseInitStatus.INIT_FAILED.name(),
+                initMessage,
+                dbKey,
+                DatabaseInitStatus.INITIALIZING.name(),
+                leaseToken) == 1;
+    }
+
+    public record InitializationLease(
+            UUID token,
+            String previousStatus,
+            Instant startedAt,
+            Instant expiresAt) {
+    }
+
+    private static long requirePositiveLeaseMillis(Duration leaseDuration) {
+        if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
+            throw new IllegalArgumentException("leaseDuration must be positive");
+        }
+        long leaseMillis = leaseDuration.toMillis();
+        if (leaseMillis == 0L) {
+            throw new IllegalArgumentException("leaseDuration must be at least one millisecond");
+        }
+        return leaseMillis;
+    }
+
+    private static Instant timestampToInstant(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toInstant() : null;
     }
 
     /**
@@ -523,7 +675,7 @@ public class DatabaseConfigRepository {
      * One paginated query backing {@code GET /auth/v1/admin/projects}.
      * <p>
      * Visibility is folded into a single predicate: a super-admin (or the metadata
-     * service-role key) sees every enabled project; a regular user sees only projects
+     * service-role key) sees every active or provisioning project; a regular user sees only projects
      * they are a member of via {@code platform_user_projects} (the {@code EXISTS} check, which
      * also keeps each project to a single row regardless of how many members it has).
      *
@@ -540,7 +692,8 @@ public class DatabaseConfigRepository {
                     c.schema_name, c.init_status, c.health_status, c.enabled,
                     c.created_at, c.updated_at, c.service_role_token
                 FROM public.database_configs c
-                WHERE c.enabled = true
+                WHERE (c.enabled = true
+                       OR c.init_status IN ('PENDING_INIT', 'INITIALIZING', 'INIT_FAILED'))
                   AND ( CAST(? AS boolean) = true
                         OR EXISTS (SELECT 1 FROM public.platform_user_projects pup
                                    WHERE pup.db_key = c.db_key AND pup.user_id = ?) )
@@ -558,7 +711,8 @@ public class DatabaseConfigRepository {
         String sql = """
                 SELECT COUNT(*)
                 FROM public.database_configs c
-                WHERE c.enabled = true
+                WHERE (c.enabled = true
+                       OR c.init_status IN ('PENDING_INIT', 'INITIALIZING', 'INIT_FAILED'))
                   AND ( CAST(? AS boolean) = true
                         OR EXISTS (SELECT 1 FROM public.platform_user_projects pup
                                    WHERE pup.db_key = c.db_key AND pup.user_id = ?) )
@@ -608,12 +762,18 @@ public class DatabaseConfigRepository {
                 config.setJwtSecretDecrypted(encryptionService.decrypt(config.getJwtSecretEncrypted()));
             }
         } catch (Exception e) {
-            log.error("Failed to decrypt sensitive data for appCode: {}", appCode, e);
-            throw new IllegalStateException("Failed to decrypt database configuration", e);
+            log.error("Failed to decrypt sensitive data for appCode: {}, errorType={}",
+                    appCode, errorType(e));
+            throw new IllegalStateException("Failed to decrypt database configuration");
         }
 
         log.info("Loaded configuration for appCode: {}", appCode);
         return config;
+    }
+
+    private static String errorType(Throwable error) {
+        String simpleName = error.getClass().getSimpleName();
+        return simpleName.isBlank() ? "Exception" : simpleName;
     }
 
     /**

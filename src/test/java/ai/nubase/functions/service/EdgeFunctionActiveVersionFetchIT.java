@@ -8,6 +8,7 @@ import ai.nubase.metadata.edge.repository.EdgeFunctionVersionRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * map entities to DTOs after the service transaction has closed (open-in-view is off),
  * so the repository must fetch activeVersion eagerly (@EntityGraph).
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest
 @ActiveProfiles("dev")
 @DisplayName("EdgeFunction activeVersion fetch (dev metadata DB)")

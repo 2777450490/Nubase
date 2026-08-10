@@ -7,6 +7,7 @@ import ai.nubase.functions.service.EdgeFunctionInvocationRetentionService;
 import ai.nubase.functions.service.EdgeFunctionInvocationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
@@ -20,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * wiring like this only fails at context-assembly time, so it needs a context test —
  * compilation and plain unit tests cannot catch it.
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest(properties = "nubase.functions.enabled=false")
 @ActiveProfiles("dev")
 @DisplayName("Edge functions kill switch (dev metadata DB)")

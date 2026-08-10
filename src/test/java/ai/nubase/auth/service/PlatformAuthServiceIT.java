@@ -9,6 +9,7 @@ import ai.nubase.metadata.repository.PlatformUserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Hits the dev metadata Postgres — each test creates accounts with a unique email
  * prefix and tears them down in {@link #cleanup()}.
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest
 @ActiveProfiles("dev")
 // This IT exercises password + JWT mechanics directly; it can't fetch an emailed OTP, so it runs with

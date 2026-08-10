@@ -5,6 +5,7 @@ import ai.nubase.metadata.edge.repository.EdgeFunctionInvocationRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * written in the finally block. The writer now uses REQUIRES_NEW, so the row must
  * survive a caller transaction that rolls back.
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest
 @ActiveProfiles("dev")
 @DisplayName("EdgeFunctionInvocationLogWriter (dev metadata DB)")

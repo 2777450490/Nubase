@@ -5,6 +5,7 @@ import ai.nubase.cron.service.ScheduledJobAdminService;
 import ai.nubase.cron.service.ScheduledJobRunner;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
@@ -17,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * conditional wiring only fails at context-assembly time, so it needs a context
  * test (same lesson as the functions kill switch).
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest(properties = "nubase.cron.enabled=false")
 @ActiveProfiles("dev")
 @DisplayName("Cron kill switch (dev metadata DB)")

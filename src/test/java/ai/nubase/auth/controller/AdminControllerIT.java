@@ -1,5 +1,6 @@
 package ai.nubase.auth.controller;
 
+import ai.nubase.auth.dto.request.platform.PlatformSignInRequest;
 import ai.nubase.auth.dto.request.platform.PlatformSignUpRequest;
 import ai.nubase.auth.dto.response.platform.PlatformAuthResponse;
 import ai.nubase.auth.service.PlatformAuthService;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Spins up the full Spring context against the dev metadata Postgres, signs up a fresh
  * super-admin (when needed) and a fresh regular user, then exercises every endpoint.
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("dev")
@@ -63,7 +66,6 @@ class AdminControllerIT {
     private final List<Long> tempSnippets = new ArrayList<>();
 
     private String adminToken;
-    private String adminUserId;
     private String regularToken;
     private String regularUserId;
     /** A long-lived INITIALIZED project we'll attach test fixtures to. */
@@ -71,24 +73,27 @@ class AdminControllerIT {
 
     @BeforeEach
     void setUp() {
-        // Make sure a super-admin exists. If admin@nubase.local already exists from earlier
-        // sessions, find it; otherwise create one and accept whatever role it gets.
-        PlatformUser admin = platformUserRepository.findByEmailIgnoreCase("admin@nubase.local").orElse(null);
-        if (admin == null) {
-            PlatformSignUpRequest reg = new PlatformSignUpRequest();
-            reg.setEmail("admin@nubase.local");
-            reg.setPassword("changeme123");
-            reg.setFullName("Studio Admin");
-            PlatformAuthResponse res = platformAuthService.signUp(reg).token();
-            admin = platformUserRepository.findById(UUID.fromString(res.getUser().getId())).orElseThrow();
-        }
-        // Force role = super_admin for this fixture so the projects-list tests behave consistently.
-        if (!"super_admin".equalsIgnoreCase(admin.getRole())) {
-            admin.setRole(PlatformAuthService.PLATFORM_ROLE_SUPER_ADMIN);
-            platformUserRepository.save(admin);
-        }
-        adminUserId = admin.getId().toString();
-        adminToken = freshTokenFor(admin);
+        // Always use an ephemeral account with a random password. A fixed, long-lived admin
+        // fixture is unsafe when this explicitly opted-in test points at a shared dev database.
+        String adminEmail = "test_admin_" + UUID.randomUUID().toString().substring(0, 8)
+                + "@nubase-test.local";
+        String adminPassword = "test-" + UUID.randomUUID();
+        PlatformSignUpRequest adminRegistration = new PlatformSignUpRequest();
+        adminRegistration.setEmail(adminEmail);
+        adminRegistration.setPassword(adminPassword);
+        adminRegistration.setFullName("Admin Tester");
+        PlatformAuthResponse adminResponse = platformAuthService.signUp(adminRegistration).token();
+        PlatformUser admin = platformUserRepository
+                .findById(UUID.fromString(adminResponse.getUser().getId()))
+                .orElseThrow();
+        admin.setRole(PlatformAuthService.PLATFORM_ROLE_SUPER_ADMIN);
+        platformUserRepository.save(admin);
+        tempPlatformUsers.add(admin.getId());
+
+        PlatformSignInRequest adminSignIn = new PlatformSignInRequest();
+        adminSignIn.setEmail(adminEmail);
+        adminSignIn.setPassword(adminPassword);
+        adminToken = platformAuthService.signIn(adminSignIn).token().getAccessToken();
 
         // Create a regular user fresh per test.
         String reEmail = "test_user_" + UUID.randomUUID().toString().substring(0, 8) + "@nubase-test.local";
@@ -125,32 +130,10 @@ class AdminControllerIT {
         tempPlatformUsers.clear();
     }
 
-    private String freshTokenFor(PlatformUser u) {
-        // Reuse the service to sign a token without going through signIn (avoids password check).
-        ai.nubase.auth.dto.request.platform.PlatformSignInRequest req =
-                new ai.nubase.auth.dto.request.platform.PlatformSignInRequest();
-        req.setEmail(u.getEmail());
-        // We don't know the password for pre-existing admin@nubase.local; sign in directly via repo + manual JWT.
-        // Easiest path: call signIn with the known "changeme123" since the migration / bootstrap used it.
-        // If that fails, fall back to a forced re-set via service.
-        try {
-            req.setPassword("changeme123");
-            return platformAuthService.signIn(req).token().getAccessToken();
-        } catch (Exception e) {
-            // Test fixture safety: rotate the password to a known value, then sign in.
-            String hashed = "changeme123";
-            u.setEncryptedPassword(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
-                    .encode(hashed));
-            platformUserRepository.save(u);
-            req.setPassword(hashed);
-            return platformAuthService.signIn(req).token().getAccessToken();
-        }
-    }
-
     // ==================== /admin/projects ====================
 
     @Test
-    @DisplayName("super_admin GET /admin/projects returns all enabled projects")
+    @DisplayName("super_admin GET /admin/projects returns all visible projects")
     void superAdminSeesAllProjects() throws Exception {
         long total = databaseConfigRepository.findAllEnabled().size();
         mvc.perform(get("/auth/v1/admin/projects").header("apikey", adminToken))

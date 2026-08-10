@@ -5,6 +5,7 @@ import ai.nubase.metadata.cron.repository.ScheduledJobRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * live claim and allowing the same occurrence to run twice. With @DynamicUpdate
  * only the admin-touched columns are written and the claim must survive.
  */
+@EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
 @SpringBootTest
 @ActiveProfiles("dev")
 @DisplayName("ScheduledJob admin-update vs claim race (dev metadata DB)")

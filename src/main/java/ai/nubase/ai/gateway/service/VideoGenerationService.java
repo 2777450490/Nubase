@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -251,24 +252,30 @@ public class VideoGenerationService {
         call.timeout().timeout(Math.min(MAX_CALL_TIMEOUT_MS, Math.max(1, upstream.timeoutMs())),
                 TimeUnit.MILLISECONDS);
         boolean recorded = false;
+        int upstreamStatus = 0;
+        int responseBodyBytes = 0;
+        String responseBody = null;
         try (Response response = call.execute()) {
             long durationMs = System.currentTimeMillis() - startedAt;
-            String responseBody = response.body() == null ? "{}" : response.body().string();
+            upstreamStatus = response.code();
+            byte[] responseBytes = response.body() == null ? new byte[0] : response.body().bytes();
+            responseBodyBytes = responseBytes.length;
+            responseBody = new String(responseBytes, StandardCharsets.UTF_8);
             if (!response.isSuccessful()) {
-                String error = "Video upstream request failed: " + response.code() + " - "
-                        + truncate(sanitizeMediaJson(responseBody), 2000);
+                UpstreamHttpException upstreamException =
+                        new UpstreamHttpException(upstreamStatus, responseBodyBytes);
                 recordCall(publicPath, method, requestId, clientApiKey, headers, requestJson,
-                        response.code(), responseBody, durationMs, upstream, error);
+                        upstreamStatus, responseBody, durationMs, upstream, upstreamException.safeSummary());
                 recorded = true;
-                throw new UpstreamHttpException(error);
+                throw upstreamException;
             }
 
             JsonNode parsed = objectMapper.readTree(responseBody);
             if (!(parsed instanceof ObjectNode objectResponse)) {
-                throw new IOException("Video upstream response must be a JSON object");
+                throw new UpstreamHttpException(upstreamStatus, responseBodyBytes);
             }
             if (CREATE_PATH.equals(publicPath) && textOrNull(objectResponse.path("name")) == null) {
-                throw new IOException("Video upstream returned no operation name");
+                throw new UpstreamHttpException(upstreamStatus, responseBodyBytes);
             }
             objectResponse.put("model", SEEDANCE_MODEL);
             objectResponse.put("upstream", upstream.name());
@@ -278,12 +285,15 @@ public class VideoGenerationService {
             recorded = true;
             return objectResponse;
         } catch (IOException exception) {
+            UpstreamHttpException safeException = exception instanceof UpstreamHttpException upstreamException
+                    ? upstreamException
+                    : new UpstreamHttpException(upstreamStatus, responseBodyBytes);
             if (!recorded) {
                 long durationMs = System.currentTimeMillis() - startedAt;
                 recordCall(publicPath, method, requestId, clientApiKey, headers, requestJson,
-                        502, null, durationMs, upstream, exception.getMessage());
+                        502, responseBody, durationMs, upstream, safeException.safeSummary());
             }
-            throw exception;
+            throw safeException;
         }
     }
 
@@ -316,8 +326,8 @@ public class VideoGenerationService {
                     .build();
             usageTrackingService.trackUsage(record);
         } catch (Exception exception) {
-            log.error("Failed to track video usage for requestId={}: {}",
-                    requestId, exception.getMessage(), exception);
+            log.error("Failed to track video usage for requestId={}: type={}",
+                    requestId, exceptionType(exception));
         }
         try {
             requestLogService.logRequest(
@@ -334,8 +344,8 @@ public class VideoGenerationService {
                     usage,
                     errorMessage);
         } catch (Exception exception) {
-            log.error("Failed to persist video request log for requestId={}: {}",
-                    requestId, exception.getMessage(), exception);
+            log.error("Failed to persist video request log for requestId={}: type={}",
+                    requestId, exceptionType(exception));
         }
         log.info("Video gateway call completed: requestId={}, endpoint={}, upstream={}, status={}, durationMs={}",
                 requestId, publicPath, upstream.name(), statusCode, durationMs);
@@ -716,10 +726,9 @@ public class VideoGenerationService {
         return result;
     }
 
-    private String truncate(String value, int maxLength) {
-        return value == null || value.length() <= maxLength
-                ? value
-                : value.substring(0, maxLength) + "...[truncated]";
+    private String exceptionType(Exception exception) {
+        String type = exception.getClass().getSimpleName();
+        return type.isBlank() ? Exception.class.getSimpleName() : type;
     }
 
     private record ResolvedUpstream(
@@ -729,9 +738,33 @@ public class VideoGenerationService {
             int timeoutMs) {
     }
 
-    private static final class UpstreamHttpException extends IOException {
-        private UpstreamHttpException(String message) {
-            super(message);
+    public static final class UpstreamHttpException extends IOException {
+
+        private final Integer statusCode;
+        private final int bodyBytes;
+
+        public UpstreamHttpException(int statusCode, int bodyBytes) {
+            super(safeSummary(statusCode > 0 ? statusCode : null, bodyBytes));
+            this.statusCode = statusCode > 0 ? statusCode : null;
+            this.bodyBytes = bodyBytes;
+        }
+
+        public Integer getStatusCode() {
+            return statusCode;
+        }
+
+        public int getBodyBytes() {
+            return bodyBytes;
+        }
+
+        public String safeSummary() {
+            return safeSummary(statusCode, bodyBytes);
+        }
+
+        private static String safeSummary(Integer statusCode, int bodyBytes) {
+            return "Video upstream request failed: status="
+                    + (statusCode == null ? "unavailable" : statusCode)
+                    + ", bodyBytes=" + bodyBytes;
         }
     }
 }

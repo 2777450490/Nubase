@@ -80,11 +80,19 @@ public class ZenmuxOpenAiImageClient {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
-            String responseBody = response.body() != null ? response.body().string() : "{}";
+            byte[] responseBody = response.body() != null ? response.body().bytes() : new byte[0];
             if (!response.isSuccessful()) {
-                throw new IOException("Zenmux image API error [" + response.code() + "]: " + responseBody);
+                throw new UpstreamHttpException(response.code(), responseBody.length);
             }
-            return parseImagePredictResult(objectMapper.readTree(responseBody));
+            try {
+                JsonNode responseJson = objectMapper.readTree(responseBody);
+                if (responseJson == null) {
+                    throw new IOException("Empty image upstream response");
+                }
+                return parseImagePredictResult(responseJson);
+            } catch (IOException | RuntimeException exception) {
+                throw new UpstreamHttpException(response.code(), responseBody.length);
+            }
         }
     }
 
@@ -343,6 +351,34 @@ public class ZenmuxOpenAiImageClient {
 
     private String firstNonBlank(String value, String fallback) {
         return value != null && !value.isBlank() ? value : fallback;
+    }
+
+    public static final class UpstreamHttpException extends IOException {
+
+        private final int statusCode;
+        private final int bodyBytes;
+
+        public UpstreamHttpException(int statusCode, int bodyBytes) {
+            super(safeSummary(statusCode, bodyBytes));
+            this.statusCode = statusCode;
+            this.bodyBytes = bodyBytes;
+        }
+
+        public int getStatusCode() {
+            return statusCode;
+        }
+
+        public int getBodyBytes() {
+            return bodyBytes;
+        }
+
+        public String safeSummary() {
+            return safeSummary(statusCode, bodyBytes);
+        }
+
+        private static String safeSummary(int statusCode, int bodyBytes) {
+            return "Zenmux image upstream request failed: status=" + statusCode + ", bodyBytes=" + bodyBytes;
+        }
     }
 
     public record ImageReference(

@@ -3,7 +3,9 @@ package ai.nubase.ai.gateway.controller;
 import ai.nubase.ai.gateway.dto.VideoGenerationRequest;
 import ai.nubase.ai.gateway.dto.VideoOperationFetchRequest;
 import ai.nubase.ai.gateway.service.VideoGenerationService;
+import ai.nubase.ai.gateway.service.VideoGenerationService.UpstreamHttpException;
 import ai.nubase.ai.gateway.util.GatewayKeyUtil;
+import ai.nubase.ai.gateway.util.SensitiveHeaderSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -47,12 +49,13 @@ public class VideoGenerationController {
                     response.path("upstream").asText());
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException exception) {
-            log.warn("Invalid video generation request: {}", exception.getMessage());
+            log.warn("Invalid video generation request: errorType={}", exceptionType(exception));
             return ResponseEntity.badRequest().body(error("invalid_request", exception.getMessage()));
         } catch (IOException exception) {
-            log.error("Video generation upstream request failed: {}", exception.getMessage());
+            log.error("Video generation upstream request failed: type={}, status={}",
+                    exceptionType(exception), upstreamStatus(exception));
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(error("upstream_error", exception.getMessage()));
+                    .body(error("upstream_error", safeUpstreamSummary(exception)));
         }
     }
 
@@ -73,13 +76,33 @@ public class VideoGenerationController {
                     response.path("upstream").asText());
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException exception) {
-            log.warn("Invalid video operation fetch request: {}", exception.getMessage());
+            log.warn("Invalid video operation fetch request: errorType={}", exceptionType(exception));
             return ResponseEntity.badRequest().body(error("invalid_request", exception.getMessage()));
         } catch (IOException exception) {
-            log.error("Video operation fetch failed: {}", exception.getMessage());
+            log.error("Video operation fetch failed: type={}, status={}",
+                    exceptionType(exception), upstreamStatus(exception));
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(error("upstream_error", exception.getMessage()));
+                    .body(error("upstream_error", safeUpstreamSummary(exception)));
         }
+    }
+
+    private String safeUpstreamSummary(IOException exception) {
+        return exception instanceof UpstreamHttpException upstreamException
+                ? upstreamException.safeSummary()
+                : "Video upstream request failed";
+    }
+
+    private String upstreamStatus(IOException exception) {
+        if (exception instanceof UpstreamHttpException upstreamException
+                && upstreamException.getStatusCode() != null) {
+            return String.valueOf(upstreamException.getStatusCode());
+        }
+        return "unavailable";
+    }
+
+    private String exceptionType(Exception exception) {
+        String type = exception.getClass().getSimpleName();
+        return type.isBlank() ? IOException.class.getSimpleName() : type;
     }
 
     private String extractClientApiKey(HttpServletRequest request) {
@@ -102,7 +125,9 @@ public class VideoGenerationController {
         Enumeration<String> names = request.getHeaderNames();
         while (names.hasMoreElements()) {
             String name = names.nextElement();
-            if (name.startsWith("x-") || name.equalsIgnoreCase("user-agent")) {
+            if (!SensitiveHeaderSanitizer.isSensitive(name)
+                    && (name.regionMatches(true, 0, "x-", 0, 2)
+                    || name.equalsIgnoreCase("user-agent"))) {
                 headers.put(name, request.getHeader(name));
             }
         }

@@ -11,10 +11,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ZenmuxOpenAiImageClientTest {
 
@@ -114,6 +116,34 @@ class ZenmuxOpenAiImageClientTest {
         assertThat(body.path("parameters").path("editMode").asText())
                 .isEqualTo("EDIT_MODE_INPAINT_INSERTION");
         assertThat(result.generatedImages().get(0).imageBase64()).isEqualTo("edited");
+    }
+
+    @Test
+    void upstreamFailureDoesNotExposeResponseBodyInExceptionMessage() {
+        String sentinel = "image-upstream-response-sentinel";
+        String responseBody = "{\"error\":{\"message\":\"" + sentinel + "\"}}";
+        server.enqueue(new MockResponse().setResponseCode(429).setBody(responseBody));
+
+        assertThatThrownBy(() -> client.generateImages("Draw a lighthouse", Map.of()))
+                .isInstanceOf(ZenmuxOpenAiImageClient.UpstreamHttpException.class)
+                .hasMessageContaining("status=429")
+                .hasMessageContaining("bodyBytes="
+                        + responseBody.getBytes(StandardCharsets.UTF_8).length)
+                .hasMessageNotContaining(sentinel);
+    }
+
+    @Test
+    void invalidSuccessResponseDoesNotExposeParserInputInExceptionMessage() {
+        String sentinel = "image-parser-response-sentinel";
+        String responseBody = "{\"error\":\"" + sentinel + "\"";
+        server.enqueue(new MockResponse().setResponseCode(200).setBody(responseBody));
+
+        assertThatThrownBy(() -> client.generateImages("Draw a lighthouse", Map.of()))
+                .isInstanceOf(ZenmuxOpenAiImageClient.UpstreamHttpException.class)
+                .hasMessageContaining("status=200")
+                .hasMessageContaining("bodyBytes="
+                        + responseBody.getBytes(StandardCharsets.UTF_8).length)
+                .hasMessageNotContaining(sentinel);
     }
 
     private MockResponse jsonResponse(String body) {

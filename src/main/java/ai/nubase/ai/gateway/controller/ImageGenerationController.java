@@ -3,6 +3,7 @@ package ai.nubase.ai.gateway.controller;
 import ai.nubase.ai.gateway.dto.ImageGenerationRequest;
 import ai.nubase.ai.gateway.dto.ImageGenerationResponse;
 import ai.nubase.ai.gateway.service.ImageGenerationService;
+import ai.nubase.ai.gateway.service.image.ZenmuxOpenAiImageClient.UpstreamHttpException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -32,13 +33,31 @@ public class ImageGenerationController {
                     response.getModel(), response.getTask(), response.getOutputs().size());
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException exception) {
-            log.warn("Invalid image generation request: {}", exception.getMessage());
+            log.warn("Invalid image generation request: errorType={}", exceptionType(exception));
             return ResponseEntity.badRequest().body(error("invalid_request", exception.getMessage()));
         } catch (IOException exception) {
-            log.error("Image generation upstream request failed: {}", exception.getMessage());
+            log.error("Image generation upstream request failed: type={}, status={}",
+                    exceptionType(exception), upstreamStatus(exception));
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(error("upstream_error", exception.getMessage()));
+                    .body(error("upstream_error", safeUpstreamSummary(exception)));
         }
+    }
+
+    private String safeUpstreamSummary(IOException exception) {
+        return exception instanceof UpstreamHttpException upstreamException
+                ? upstreamException.safeSummary()
+                : "Image upstream request failed";
+    }
+
+    private String upstreamStatus(IOException exception) {
+        return exception instanceof UpstreamHttpException upstreamException
+                ? String.valueOf(upstreamException.getStatusCode())
+                : "unavailable";
+    }
+
+    private String exceptionType(Exception exception) {
+        String type = exception.getClass().getSimpleName();
+        return type.isBlank() ? IOException.class.getSimpleName() : type;
     }
 
     private Map<String, Object> error(String code, String message) {

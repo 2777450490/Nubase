@@ -9,6 +9,7 @@ import { NotProvisioned } from '@/components/not-provisioned';
 import { AuthSubNav } from '../_components/sub-nav';
 import { SectionCard, Row, BoolInput, TextInput } from '../_components/form-bits';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 import type { OAuthProperties, OAuthProviderConfig } from '@/lib/auth-types';
 
 /** OAuth providers Nubase ships backend implementations for. */
@@ -33,6 +34,8 @@ export default function AuthProvidersPage({ params }: { params: { ref: string } 
 }
 
 function ProvidersInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
 
@@ -55,7 +58,7 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
       setConfig(normalized);
       setDraft(structuredClone(normalized));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load OAuth providers.');
+      setError((err as ApiError).message ?? trLoose('authProviders.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -86,10 +89,10 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
     setResult(null);
     try {
       await apiFetch('/auth/v1/admin/oauth', { method: 'PUT', body: draft, apikey });
-      setResult({ ok: true, message: 'Saved. Takes effect on the next request.' });
+      setResult({ ok: true, message: trLoose('authCommon.saved') });
       await load();
     } catch (err) {
-      setResult({ ok: false, message: (err as ApiError).message ?? 'Save failed.' });
+      setResult({ ok: false, message: (err as ApiError).message ?? trLoose('authCommon.saveFailed') });
     } finally {
       setSaving(false);
     }
@@ -108,26 +111,27 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
         <div className="max-w-4xl space-y-6 p-6">
           <header className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-lg font-semibold">OAuth providers</h1>
+              <h1 className="text-lg font-semibold">{tr('authProviders.title')}</h1>
               <p className="text-xs text-muted-foreground">
-                Social sign-in for the <code className="mx-1 rounded bg-muted/40 px-1">{projectRef}</code> tenant.
-                The callback URL is built automatically as
-                <code className="mx-1 rounded bg-muted/40 px-1">{`https://{tenant-domain}/auth/v1/callback`}</code>;
-                register that as the redirect URI in each provider&apos;s console.
+                {tr('authProviders.descPrefix')}{' '}
+                <code className="mx-1 rounded bg-muted/40 px-1">{projectRef}</code>{' '}
+                {tr('authProviders.descMid')}{' '}
+                <code className="mx-1 rounded bg-muted/40 px-1">{`https://{tenant-domain}/auth/v1/callback`}</code>
+                {tr('authProviders.descSuffix')}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {dirty && (
                 <Button size="sm" variant="outline" onClick={revert} disabled={saving}>
-                  <RotateCcw className="h-3.5 w-3.5" /> Discard
+                  <RotateCcw className="h-3.5 w-3.5" /> {tr('authCommon.discard')}
                 </Button>
               )}
               <Button size="sm" variant="brand" onClick={save} disabled={!dirty || saving}>
                 <Save className={'h-3.5 w-3.5 ' + (saving ? 'animate-pulse' : '')} />
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? trLoose('authCommon.saving') : trLoose('authCommon.save')}
               </Button>
               <Button size="sm" variant="outline" onClick={load} disabled={loading || saving}>
-                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> Refresh
+                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> {tr('authCommon.refresh')}
               </Button>
             </div>
           </header>
@@ -142,7 +146,7 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
               </CardContent>
             </Card>
           )}
-          {loading && !draft && <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>}
+          {loading && !draft && <p className="py-8 text-center text-sm text-muted-foreground">{tr('authCommon.loading')}</p>}
 
           {draft &&
             KNOWN_PROVIDERS.map((prov) => {
@@ -152,19 +156,19 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
                   key={prov.key}
                   icon={KeyRound}
                   title={prov.label}
-                  description={cfg.enabled ? 'Enabled' : 'Disabled — toggle on and add credentials to use.'}
+                  description={cfg.enabled ? trLoose('authProviders.enabledDesc') : trLoose('authProviders.disabledDesc')}
                 >
-                  <Row label="Enabled">
+                  <Row label={tr('authProviders.enabled')}>
                     <BoolInput value={cfg.enabled} onChange={(v) => patchProvider(prov.key, (p) => (p.enabled = v))} />
                   </Row>
-                  <Row label="Client ID">
+                  <Row label={tr('authProviders.clientId')}>
                     <TextInput
                       value={cfg.clientId ?? ''}
                       onChange={(v) => patchProvider(prov.key, (p) => (p.clientId = v))}
-                      placeholder="client id"
+                      placeholder={tr('authProviders.clientIdPlaceholder')}
                     />
                   </Row>
-                  <Row label="Client Secret">
+                  <Row label={tr('authProviders.clientSecret')}>
                     <TextInput
                       value={cfg.clientSecret ?? ''}
                       onChange={(v) => patchProvider(prov.key, (p) => (p.clientSecret = v))}
@@ -172,18 +176,18 @@ function ProvidersInner({ projectRef }: { projectRef: string }) {
                       type="password"
                     />
                   </Row>
-                  <Row label="Scope">
+                  <Row label={tr('authProviders.scope')}>
                     <TextInput
                       value={cfg.scope ?? ''}
                       onChange={(v) => patchProvider(prov.key, (p) => (p.scope = v))}
                       placeholder={prov.scope}
                     />
                   </Row>
-                  <Row label="Redirect URI (optional)">
+                  <Row label={tr('authProviders.redirectUri')}>
                     <TextInput
                       value={cfg.redirectUri ?? ''}
                       onChange={(v) => patchProvider(prov.key, (p) => (p.redirectUri = v))}
-                      placeholder="leave blank to auto-build"
+                      placeholder={tr('authProviders.autoBuildPlaceholder')}
                     />
                   </Row>
                 </SectionCard>

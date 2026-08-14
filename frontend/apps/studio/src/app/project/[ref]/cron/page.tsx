@@ -9,6 +9,7 @@ import { NotProvisioned } from '@/components/not-provisioned';
 import { InfoTile } from '@/components/info-tile';
 import { formatDate } from '@/lib/format';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface ScheduledJob {
   id: string;
@@ -84,6 +85,7 @@ export default function CronPage({ params }: { params: { ref: string } }) {
 }
 
 function CronInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
   const { project } = useSession();
   const apikey = project!.apikey;
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
@@ -105,7 +107,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
       // sidebar selection does not refetch the whole list.
       setSelected((prev) => (prev && list.some((job) => job.name === prev) ? prev : list[0]?.name ?? null));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load scheduled jobs.');
+      setError((err as ApiError).message ?? tr('cron.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -148,11 +150,11 @@ function CronInner({ projectRef }: { projectRef: string }) {
     const name = draft.name.trim();
     if (!name) return;
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(name)) {
-      setDraftError('Name may only contain letters, digits, "_" and "-" (max 128 chars).');
+      setDraftError(tr('cron.nameInvalid'));
       return;
     }
     if (!draft.cronExpression.trim()) {
-      setDraftError('Cron expression is required.');
+      setDraftError(tr('cron.cronRequired'));
       return;
     }
     let dbFunctionArgs: Record<string, unknown> | undefined;
@@ -162,13 +164,13 @@ function CronInner({ projectRef }: { projectRef: string }) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
         dbFunctionArgs = parsed;
       } catch {
-        setDraftError('Function args must be a JSON object, e.g. {"days": 7}.');
+        setDraftError(tr('cron.argsInvalid'));
         return;
       }
     }
     const timeoutSeconds = draft.timeoutSeconds.trim() ? Number(draft.timeoutSeconds) : undefined;
     if (timeoutSeconds !== undefined && (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0)) {
-      setDraftError('Timeout must be a positive number of seconds.');
+      setDraftError(tr('cron.timeoutInvalid'));
       return;
     }
     setBusy('create');
@@ -196,7 +198,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
       setSelected(job.name);
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Create failed.');
+      setError((err as ApiError).message ?? tr('cron.createFailed'));
     } finally {
       setBusy(null);
     }
@@ -214,14 +216,14 @@ function CronInner({ projectRef }: { projectRef: string }) {
       });
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Update failed.');
+      setError((err as ApiError).message ?? tr('cron.updateFailed'));
     } finally {
       setBusy(null);
     }
   }
 
   async function deleteJob(job: ScheduledJob) {
-    if (!window.confirm(`Delete scheduled job "${job.name}"? This cannot be undone.`)) return;
+    if (!window.confirm(tr('cron.deleteConfirm', { name: job.name }))) return;
     setBusy(`delete:${job.name}`);
     setError(null);
     try {
@@ -233,7 +235,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
       setSelected(null);
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? tr('cron.deleteFailed'));
     } finally {
       setBusy(null);
     }
@@ -248,10 +250,8 @@ function CronInner({ projectRef }: { projectRef: string }) {
               <CalendarClock className="h-4 w-4 text-brand" />
             </div>
             <div>
-              <h1 className="text-base font-semibold">Cron</h1>
-              <p className="text-xs text-muted-foreground">
-                Scheduled jobs for <span className="font-mono">{projectRef}</span>.
-              </p>
+              <h1 className="text-base font-semibold">{tr('cron.title')}</h1>
+              <p className="text-xs text-muted-foreground">{tr('cron.subtitle', { ref: projectRef })}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -260,7 +260,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
             </code>
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} />
-              Refresh
+              {tr('cron.refresh')}
             </Button>
           </div>
         </div>
@@ -271,27 +271,27 @@ function CronInner({ projectRef }: { projectRef: string }) {
           <form onSubmit={createJob} className="space-y-3 rounded-lg border border-border bg-card p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Plus className="h-4 w-4" />
-              New job
+              {tr('cron.newJob')}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="job-name" className="text-xs">Name</Label>
+              <Label htmlFor="job-name" className="text-xs">{tr('cron.name')}</Label>
               <Input id="job-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="nightly-cleanup" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="job-cron" className="text-xs">Cron expression</Label>
+              <Label htmlFor="job-cron" className="text-xs">{tr('cron.cronExpression')}</Label>
               <Input id="job-cron" value={draft.cronExpression} onChange={(e) => setDraft({ ...draft, cronExpression: e.target.value })} placeholder="0 3 * * *" className="font-mono" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Target</Label>
+              <Label className="text-xs">{tr('cron.target')}</Label>
               <div className="grid grid-cols-2 gap-2">
                 <TargetButton
-                  label="Edge function"
+                  label={tr('cron.edgeFunction')}
                   icon={Zap}
                   active={draft.targetType === 'edge_function'}
                   onClick={() => setDraft({ ...draft, targetType: 'edge_function' })}
                 />
                 <TargetButton
-                  label="DB function"
+                  label={tr('cron.dbFunction')}
                   icon={Database}
                   active={draft.targetType === 'db_function'}
                   onClick={() => setDraft({ ...draft, targetType: 'db_function' })}
@@ -301,21 +301,21 @@ function CronInner({ projectRef }: { projectRef: string }) {
             {draft.targetType === 'edge_function' ? (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="job-fn" className="text-xs">Function slug</Label>
+                  <Label htmlFor="job-fn" className="text-xs">{tr('cron.functionSlug')}</Label>
                   <Input id="job-fn" value={draft.functionSlug} onChange={(e) => setDraft({ ...draft, functionSlug: e.target.value })} placeholder="cleanup" className="font-mono" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="job-method" className="text-xs">Method</Label>
+                    <Label htmlFor="job-method" className="text-xs">{tr('cron.method')}</Label>
                     <Input id="job-method" value={draft.httpMethod} onChange={(e) => setDraft({ ...draft, httpMethod: e.target.value })} placeholder="POST" className="font-mono" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="job-path" className="text-xs">Path</Label>
+                    <Label htmlFor="job-path" className="text-xs">{tr('cron.path')}</Label>
                     <Input id="job-path" value={draft.requestPath} onChange={(e) => setDraft({ ...draft, requestPath: e.target.value })} placeholder="/run" className="font-mono" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="job-body" className="text-xs">Request body</Label>
+                  <Label htmlFor="job-body" className="text-xs">{tr('cron.requestBody')}</Label>
                   <textarea
                     id="job-body"
                     value={draft.requestBody}
@@ -328,11 +328,11 @@ function CronInner({ projectRef }: { projectRef: string }) {
             ) : (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="job-dbfn" className="text-xs">Database function</Label>
+                  <Label htmlFor="job-dbfn" className="text-xs">{tr('cron.dbFunctionName')}</Label>
                   <Input id="job-dbfn" value={draft.dbFunctionName} onChange={(e) => setDraft({ ...draft, dbFunctionName: e.target.value })} placeholder="purge_old_rows" className="font-mono" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="job-args" className="text-xs">Function args (JSON object)</Label>
+                  <Label htmlFor="job-args" className="text-xs">{tr('cron.functionArgs')}</Label>
                   <textarea
                     id="job-args"
                     value={draft.dbFunctionArgs}
@@ -345,18 +345,18 @@ function CronInner({ projectRef }: { projectRef: string }) {
             )}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label htmlFor="job-timeout" className="text-xs">Timeout (s)</Label>
+                <Label htmlFor="job-timeout" className="text-xs">{tr('cron.timeout')}</Label>
                 <Input id="job-timeout" value={draft.timeoutSeconds} onChange={(e) => setDraft({ ...draft, timeoutSeconds: e.target.value })} placeholder="60" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="job-desc" className="text-xs">Description</Label>
+                <Label htmlFor="job-desc" className="text-xs">{tr('cron.description')}</Label>
                 <Input id="job-desc" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="optional" />
               </div>
             </div>
             {draftError ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">{draftError}</p> : null}
             <Button size="sm" className="w-full" disabled={busy === 'create'}>
               <Plus className="h-3.5 w-3.5" />
-              Create job
+              {tr('cron.createJob')}
             </Button>
           </form>
 
@@ -374,7 +374,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-semibold">{job.name}</span>
-                  <Badge variant={job.enabled ? 'success' : 'warning'}>{job.enabled ? 'on' : 'off'}</Badge>
+                  <Badge variant={job.enabled ? 'success' : 'warning'}>{job.enabled ? tr('cron.on') : tr('cron.off')}</Badge>
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
@@ -384,13 +384,13 @@ function CronInner({ projectRef }: { projectRef: string }) {
                   <StatusBadge status={job.lastStatus} />
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  next: {formatDate(job.nextRunAt)}
+                  {tr('cron.next', { date: formatDate(job.nextRunAt) })}
                 </div>
               </button>
             ))}
             {!loading && jobs.length === 0 ? (
               <p className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-                No scheduled jobs yet. Create one here or with <span className="font-mono">nubase_cli cron create</span>.
+                {tr('cron.empty')}
               </p>
             ) : null}
           </div>
@@ -403,46 +403,46 @@ function CronInner({ projectRef }: { projectRef: string }) {
                 <CardHeader className="flex-row items-start justify-between space-y-0">
                   <div>
                     <CardTitle className="text-base">{current.name}</CardTitle>
-                    <p className="mt-1 text-xs text-muted-foreground">{current.description || 'No description.'}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{current.description || tr('cron.noDescription')}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => toggleJob(current)} disabled={busy === current.name}>
                       <Play className="h-3.5 w-3.5" />
-                      {current.enabled ? 'Disable' : 'Enable'}
+                      {current.enabled ? tr('cron.disable') : tr('cron.enable')}
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => deleteJob(current)} disabled={busy === `delete:${current.name}`}>
                       <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      {tr('cron.delete')}
                     </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
-                    <InfoTile label="Schedule" value={current.cronExpression} mono />
-                    <InfoTile label="Next run" value={formatDate(current.nextRunAt)} />
-                    <InfoTile label="Last run" value={formatDate(current.lastRunAt)} />
-                    <InfoTile label="Timeout" value={current.timeoutSeconds != null ? `${current.timeoutSeconds}s` : '-'} />
+                    <InfoTile label={tr('cron.schedule')} value={current.cronExpression} mono />
+                    <InfoTile label={tr('cron.nextRun')} value={formatDate(current.nextRunAt)} />
+                    <InfoTile label={tr('cron.lastRun')} value={formatDate(current.lastRunAt)} />
+                    <InfoTile label={tr('cron.timeoutVal')} value={current.timeoutSeconds != null ? `${current.timeoutSeconds}s` : '-'} />
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Target</CardTitle>
+                  <CardTitle className="text-base">{tr('cron.targetCard')}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {current.targetType === 'edge_function' ? (
                     <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
-                      <InfoTile label="Type" value="Edge function" />
-                      <InfoTile label="Function" value={current.functionSlug ?? '-'} mono />
-                      <InfoTile label="Request" value={`${current.httpMethod ?? 'POST'} ${current.requestPath || '/'}`} mono />
-                      <InfoTile label="Body" value={current.requestBody || '-'} mono />
+                      <InfoTile label={tr('cron.type')} value={tr('cron.edgeFunction')} />
+                      <InfoTile label={tr('cron.function')} value={current.functionSlug ?? '-'} mono />
+                      <InfoTile label={tr('cron.request')} value={`${current.httpMethod ?? 'POST'} ${current.requestPath || '/'}`} mono />
+                      <InfoTile label={tr('cron.body')} value={current.requestBody || '-'} mono />
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
-                      <InfoTile label="Type" value="Database function" />
-                      <InfoTile label="Function" value={current.dbFunctionName ?? '-'} mono />
-                      <InfoTile label="Args" value={current.dbFunctionArgs || '-'} mono />
+                      <InfoTile label={tr('cron.type')} value={tr('cron.dbFunctionName')} />
+                      <InfoTile label={tr('cron.function')} value={current.dbFunctionName ?? '-'} mono />
+                      <InfoTile label={tr('cron.args')} value={current.dbFunctionArgs || '-'} mono />
                     </div>
                   )}
                 </CardContent>
@@ -450,7 +450,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
 
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0">
-                  <CardTitle className="text-base">Recent Runs</CardTitle>
+                  <CardTitle className="text-base">{tr('cron.recentRuns')}</CardTitle>
                   <StatusBadge status={current.lastStatus} />
                 </CardHeader>
                 <CardContent>
@@ -458,10 +458,10 @@ function CronInner({ projectRef }: { projectRef: string }) {
                     <table className="w-full text-left text-xs">
                       <thead className="bg-muted/60 text-muted-foreground">
                         <tr>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Started</th>
-                          <th className="px-3 py-2">Duration</th>
-                          <th className="px-3 py-2">Result / Error</th>
+                          <th className="px-3 py-2">{tr('cron.colStatus')}</th>
+                          <th className="px-3 py-2">{tr('cron.colStarted')}</th>
+                          <th className="px-3 py-2">{tr('cron.colDuration')}</th>
+                          <th className="px-3 py-2">{tr('cron.colResult')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -477,7 +477,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
                         ))}
                         {runs.length === 0 ? (
                           <tr className="border-t border-border">
-                            <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No runs yet.</td>
+                            <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">{tr('cron.noRuns')}</td>
                           </tr>
                         ) : null}
                       </tbody>
@@ -488,7 +488,7 @@ function CronInner({ projectRef }: { projectRef: string }) {
             </div>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select or create a scheduled job.
+              {tr('cron.selectOrCreate')}
             </div>
           )}
         </section>
@@ -524,7 +524,8 @@ function TargetButton({
 }
 
 function StatusBadge({ status }: { status?: string | null }) {
-  if (!status) return <Badge variant="outline">never run</Badge>;
+  const { tr } = useI18n();
+  if (!status) return <Badge variant="outline">{tr('cron.neverRun')}</Badge>;
   if (status === 'success') return <Badge variant="success">{status}</Badge>;
   return <Badge variant="outline" className="border-destructive/30 bg-destructive/10 text-destructive">{status}</Badge>;
 }

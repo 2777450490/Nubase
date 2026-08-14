@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotProvisioned } from './not-provisioned';
+import { I18nProvider } from '../lib/i18n';
 
 const routerRefresh = vi.fn();
 const setProject = vi.fn();
@@ -8,36 +9,36 @@ const setProject = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: routerRefresh }),
 }));
-vi.mock('@/lib/route-params', () => ({
+vi.mock('../lib/route-params', () => ({
   useProjectRef: (projectRef: string) => projectRef,
 }));
-vi.mock('@/lib/session', () => ({
+vi.mock('../lib/session', () => ({
   useSession: () => ({
     platformKey: 'PLATFORM_KEY',
     project: { ref: 'demo', apikey: '', initStatus: 'PENDING_INIT' },
     setProject,
   }),
 }));
-vi.mock('@/lib/api', () => ({
+vi.mock('../lib/api', () => ({
   apiFetch: vi.fn(),
   fetchAllProjects: vi.fn(),
 }));
-vi.mock('@/lib/project-provisioning', async () => {
+vi.mock('../lib/project-provisioning', async () => {
   const actual = await vi.importActual<
-    typeof import('@/lib/project-provisioning')
-  >('@/lib/project-provisioning');
+    typeof import('../lib/project-provisioning')
+  >('../lib/project-provisioning');
   return {
     ...actual,
     pollProjectProvisioning: vi.fn(),
   };
 });
 
-import { apiFetch, fetchAllProjects } from '@/lib/api';
+import { apiFetch, fetchAllProjects } from '../lib/api';
 import {
   pollProjectProvisioning,
   ProjectProvisioningTimeoutError,
   type ProjectProvisioningStatus,
-} from '@/lib/project-provisioning';
+} from '../lib/project-provisioning';
 
 describe('NotProvisioned', () => {
   beforeEach(() => {
@@ -54,7 +55,7 @@ describe('NotProvisioned', () => {
     vi.mocked(pollProjectProvisioning).mockImplementation(
       async (loadStatus, options) => {
         const current = await loadStatus();
-        options.onStatus?.(current);
+        options?.onStatus?.(current);
         return current;
       },
     );
@@ -76,7 +77,7 @@ describe('NotProvisioned', () => {
       },
     ]);
 
-    render(<NotProvisioned projectRef="demo" initStatus="PENDING_INIT" />);
+    render(<I18nProvider><NotProvisioned projectRef="demo" initStatus="PENDING_INIT" /></I18nProvider>);
 
     await waitFor(() => {
       expect(setProject).toHaveBeenCalledWith(
@@ -99,7 +100,7 @@ describe('NotProvisioned', () => {
       new ProjectProvisioningTimeoutError(initializing),
     );
 
-    render(<NotProvisioned projectRef="demo" initStatus="PENDING_INIT" />);
+    render(<I18nProvider><NotProvisioned projectRef="demo" initStatus="PENDING_INIT" /></I18nProvider>);
 
     expect(
       await screen.findByText(

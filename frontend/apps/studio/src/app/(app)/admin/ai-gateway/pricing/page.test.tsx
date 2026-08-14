@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CustomerBillingPricesPage from './page';
+import { I18nProvider } from '../../../../../lib/i18n';
 
 const replace = vi.fn();
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
-vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
+vi.mock('../../../../../lib/api', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/lib/session', () => ({
   useSession: () => ({
     platformKey: 'PLATFORM_KEY',
@@ -15,7 +16,7 @@ vi.mock('@/lib/session', () => ({
   isSuperAdmin: (user: { role?: string } | null) => user?.role === 'super_admin',
 }));
 
-import { apiFetch } from '@/lib/api';
+import { apiFetch } from '../../../../../lib/api';
 
 const prices = [
   {
@@ -58,7 +59,7 @@ describe('CustomerBillingPricesPage', () => {
   });
 
   it('loads central price history and discovered platform models with platform auth', async () => {
-    render(<CustomerBillingPricesPage />);
+    render(<I18nProvider><CustomerBillingPricesPage /></I18nProvider>);
 
     expect(await screen.findByText('DeepSeek V4 Pro')).toBeInTheDocument();
     expect(screen.getByText('glm-5.2')).toBeInTheDocument();
@@ -73,7 +74,7 @@ describe('CustomerBillingPricesPage', () => {
   });
 
   it('prefills an unpriced discovered model and publishes a new immutable price version', async () => {
-    render(<CustomerBillingPricesPage />);
+    render(<I18nProvider><CustomerBillingPricesPage /></I18nProvider>);
     await screen.findByText('DeepSeek V4 Pro');
 
     fireEvent.click(screen.getByRole('button', { name: 'glm-5.2' }));

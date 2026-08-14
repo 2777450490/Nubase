@@ -8,15 +8,18 @@ import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { API_BASE } from '@/lib/api';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
-const QUICK_LINKS = [
-  { label: 'Browse tables', href: 'editor', icon: Table2 },
-  { label: 'Run SQL', href: 'sql', icon: Terminal },
-  { label: 'Manage users', href: 'auth', icon: Users },
-  { label: 'Browse storage', href: 'storage', icon: HardDrive },
+const QUICK_LINKS = (tr: (key: string, values?: Record<string, string | number>) => string) => [
+  { label: tr('projectHome.browseTables'), href: 'editor', icon: Table2 },
+  { label: tr('projectHome.runSql'), href: 'sql', icon: Terminal },
+  { label: tr('projectHome.manageUsers'), href: 'auth', icon: Users },
+  { label: tr('projectHome.browseStorage'), href: 'storage', icon: HardDrive },
 ];
 
 export default function ProjectHome({ params }: { params: { ref: string } }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const project = useSession((s) => s.project);
   const projectRef = useProjectRef(params.ref);
   const ready = isProjectReady(project);
@@ -34,7 +37,7 @@ export default function ProjectHome({ params }: { params: { ref: string } }) {
     return (
       <div className="space-y-6 p-8">
         <header>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Project</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{tr('projectHome.section')}</p>
           <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
         </header>
         <NotProvisioned projectRef={projectRef} initStatus={project?.initStatus} />
@@ -45,12 +48,12 @@ export default function ProjectHome({ params }: { params: { ref: string } }) {
   return (
     <div className="space-y-6 p-8">
       <header>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">Project</p>
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">{tr('projectHome.section')}</p>
         <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
       </header>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {QUICK_LINKS.map((q) => {
+        {QUICK_LINKS(trLoose).map((q) => {
           const Icon = q.icon;
           return (
             <Link key={q.href} href={`/project/${projectRef}/${q.href}`}>
@@ -68,20 +71,20 @@ export default function ProjectHome({ params }: { params: { ref: string } }) {
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Connection</CardTitle>
-            <CardDescription>Use this API URL and key in your client.</CardDescription>
+            <CardTitle className="text-base">{tr('projectHome.connection')}</CardTitle>
+            <CardDescription>{tr('projectHome.connectionDesc')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-xs">
-            <CopyField label="URL" value={apiUrl} mono />
-            <CopyField label="service_role key" value={project?.apikey ?? ''} mono masked />
+            <CopyField label={tr('projectHome.url')} value={apiUrl} mono />
+            <CopyField label={tr('projectHome.serviceKey')} value={project?.apikey ?? ''} mono masked />
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Recent activity</CardTitle>
-            <CardDescription>Queries, edits and migrations across this project.</CardDescription>
+            <CardTitle className="text-base">{tr('projectHome.recentActivity')}</CardTitle>
+            <CardDescription>{tr('projectHome.activityDesc')}</CardDescription>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">No activity yet.</CardContent>
+          <CardContent className="text-sm text-muted-foreground">{tr('projectHome.noActivity')}</CardContent>
         </Card>
       </section>
     </div>
@@ -101,7 +104,8 @@ function CopyField({
   masked?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   async function copy() {
     if (!value) return;
     try {
@@ -127,7 +131,7 @@ function CopyField({
           variant="ghost"
           onClick={copy}
           disabled={!value}
-          aria-label={`Copy ${label}`}
+          aria-label={`${trLoose('projectHome.copy', { label })}`}
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
         </Button>

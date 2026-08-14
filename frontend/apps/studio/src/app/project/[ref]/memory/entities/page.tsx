@@ -28,6 +28,7 @@ import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { MemorySubNav } from '../_components/sub-nav';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 import type { EntityItem, PagedResponse } from '@/lib/mem-types';
 
 const PAGE_SIZE = 50;
@@ -44,6 +45,8 @@ export default function EntitiesPage({ params }: { params: { ref: string } }) {
 }
 
 function EntitiesInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
 
@@ -71,7 +74,7 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
       setItems(res.items ?? []);
       setTotal(res.total ?? 0);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load entities.');
+      setError((err as ApiError).message ?? trLoose('entities.loadFailed'));
       setItems([]);
       setTotal(0);
     } finally {
@@ -91,7 +94,7 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
       await apiFetch(`/mem/v1/entities/${id}`, { apikey, method: 'DELETE' });
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? trLoose('entities.deleteFailed'));
     }
   };
 
@@ -103,31 +106,31 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold">
-            <Tag className="mr-1.5 inline h-3.5 w-3.5" /> Entities
+            <Tag className="mr-1.5 inline h-3.5 w-3.5" /> {tr('entities.title')}
           </h2>
-          <Badge variant="outline">{total} total</Badge>
+          <Badge variant="outline">{tr('entities.total', { n: total })}</Badge>
         </div>
         <Button size="sm" variant="outline" onClick={load}>
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          <RefreshCw className="h-3.5 w-3.5" /> {tr('entities.refresh')}
         </Button>
       </header>
 
       {/* Filter strip */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
-          <Label className="text-xs">Type</Label>
+          <Label className="text-xs">{tr('entities.type')}</Label>
           <select
             value={typeFilter}
             onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
             className="h-7 rounded-md border border-input bg-background px-2 text-xs"
           >
             {ENTITY_TYPES.map((t) => (
-              <option key={t} value={t}>{t || 'All types'}</option>
+              <option key={t} value={t}>{t || trLoose('entities.allTypes')}</option>
             ))}
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <Label className="text-xs">User ID</Label>
+          <Label className="text-xs">{tr('entities.userId')}</Label>
           <Input
             value={userIdFilter}
             onChange={(e) => setUserIdFilter(e.target.value)}
@@ -168,19 +171,19 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
           <thead className="sticky top-0 bg-card text-left text-muted-foreground">
             <tr className="border-b border-border">
               <th className="w-8 px-3 py-2" />
-              <th className="px-3 py-2">Text</th>
-              <th className="w-32 px-3 py-2">Type</th>
-              <th className="w-48 px-3 py-2">User</th>
-              <th className="w-24 px-3 py-2">Links</th>
-              <th className="w-32 px-3 py-2">Created</th>
+              <th className="px-3 py-2">{tr('entities.colText')}</th>
+              <th className="w-32 px-3 py-2">{tr('entities.colType')}</th>
+              <th className="w-48 px-3 py-2">{tr('entities.colUser')}</th>
+              <th className="w-24 px-3 py-2">{tr('entities.colLinks')}</th>
+              <th className="w-32 px-3 py-2">{tr('entities.colCreated')}</th>
               <th className="w-16 px-3 py-2" />
             </tr>
           </thead>
           <tbody>
             {loading && items.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Loading…</td></tr>
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">{tr('entities.loading')}</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">No entities.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">{tr('entities.empty')}</td></tr>
             ) : (
               items.map((e) => {
                 const isOpen = expanded === e.id;
@@ -224,11 +227,11 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
                         <td colSpan={6} className="px-3 py-3">
                           <div className="space-y-2">
                             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                              Linked memories ({links.length})
+                              {tr('entities.linkedMemories', { n: links.length })}
                             </div>
                             {links.length === 0 ? (
                               <p className="text-xs text-muted-foreground">
-                                This entity is not currently linked to any memory.
+                                {tr('entities.noLinked')}
                               </p>
                             ) : (
                               <ul className="space-y-1">
@@ -259,7 +262,7 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
       {/* Pagination */}
       <footer className="flex items-center justify-between border-t border-border px-4 py-2 text-xs">
         <span className="text-muted-foreground">
-          {total === 0 ? '0 of 0' : `${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, total)} of ${total}`}
+          {total === 0 ? trLoose('entities.ofEmpty') : trLoose('entities.of', { start: (page - 1) * PAGE_SIZE + 1, end: Math.min(page * PAGE_SIZE, total), total })}
         </span>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
@@ -274,24 +277,24 @@ function EntitiesInner({ projectRef }: { projectRef: string }) {
 
       {/* Delete confirm */}
       <Dialog open={!!deleting} onOpenChange={(v) => !v && setDeleting(null)}>
-        <DialogHeader>Delete entity?</DialogHeader>
+        <DialogHeader>{tr('entities.deleteTitle')}</DialogHeader>
         <DialogBody>
           {deleting && (
             <>
               <p className="text-sm">
-                Hard-delete the entity <span className="font-medium">&ldquo;{deleting.text}&rdquo;</span>?
+                {tr('entities.deleteConfirmPrefix')} <span className="font-medium">&ldquo;{deleting.text}&rdquo;</span>{tr('entities.deleteConfirmSuffix')}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                Memories will no longer get an entity boost from this term. Re-extraction on future
-                <code className="mx-1 rounded bg-muted/40 px-1">add</code> calls will recreate it
-                if the LLM still surfaces it.
+                {tr('entities.deleteDescPrefix')}
+                <code className="mx-1 rounded bg-muted/40 px-1">add</code>
+                {tr('entities.deleteDescSuffix')}
               </p>
             </>
           )}
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setDeleting(null)}>Cancel</Button>
-          <Button variant="destructive" onClick={performDelete}>Delete</Button>
+          <Button variant="outline" onClick={() => setDeleting(null)}>{tr('entities.cancel')}</Button>
+          <Button variant="destructive" onClick={performDelete}>{tr('entities.delete')}</Button>
         </DialogFooter>
       </Dialog>
     </div>

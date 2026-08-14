@@ -1,0 +1,110 @@
+# Local dev dependencies for nubase — intentionally on non-default host ports
+# (15432 / 16379 / 19000 / 19001) so they coexist with any pre-existing
+# Postgres / Redis / MinIO instances (e.g. the "learning-*" containers).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: nubase-dev-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postgrest_metadata}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "15432:5432"
+    volumes:
+      - nubase_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nubase-dev-network
+
+  postgres-init:
+    image: pgvector/pgvector:pg15
+    container_name: nubase-dev-postgres-init
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    command:
+      - sh
+      - -c
+      - |
+        psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgrest_metadata} \
+          -v ON_ERROR_STOP=1 \
+          -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - nubase-dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: nubase-dev-redis
+    ports:
+      - "16379:6379"
+    volumes:
+      - nubase_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nubase-dev-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: nubase-dev-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "19000:9000"   # S3 API
+      - "19001:9001"   # Web console
+    volumes:
+      - nubase_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nubase-dev-network
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: nubase-dev-minio-init
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          echo 'waiting for minio...'
+          sleep 2
+        done
+        mc mb --ignore-existing local/nubase-storage
+        mc mb --ignore-existing local/nubase-vectors
+        echo 'buckets ready'
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - nubase-dev-network
+
+volumes:
+  nubase_postgres_data:
+    driver: local
+  nubase_redis_data:
+    driver: local
+  nubase_minio_data:
+    driver: local
+
+networks:
+  nubase-dev-network:
+    driver: bridge

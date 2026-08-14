@@ -31,6 +31,7 @@ import { apiFetch, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef, useRouteSegmentAfter } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 import type { MemoryItem, MemoryHistoryEntry, EntityItem } from '@/lib/mem-types';
 
 type Tab = 'details' | 'history' | 'entities';
@@ -47,6 +48,8 @@ export default function MemoryDetailPage({ params }: { params: { ref: string; id
 }
 
 function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memoryId: string }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
   const router = useRouter();
@@ -76,7 +79,7 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
     } catch (err) {
       const apiErr = err as ApiError;
       setMemory(null);
-      setError(apiErr.status === 404 ? 'Memory not found.' : apiErr.message);
+      setError(apiErr.status === 404 ? trLoose('memDetail.notFound') : apiErr.message);
     } finally {
       setLoading(false);
     }
@@ -125,7 +128,7 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
       // Refresh history if it was loaded — the UPDATE event should appear.
       if (tab === 'history') await loadHistory();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to update memory.');
+      setError((err as ApiError).message ?? trLoose('memDetail.updateFailed'));
     } finally {
       setSaving(false);
     }
@@ -137,12 +140,12 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
       await apiFetch(`/mem/v1/memories/${memoryId}`, { apikey, method: 'DELETE' });
       router.push(`/project/${projectRef}/memory`);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? trLoose('memDetail.deleteFailed'));
     }
   };
 
   if (loading) {
-    return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
+    return <div className="p-8 text-sm text-muted-foreground">{tr('memDetail.loading')}</div>;
   }
   if (error || !memory) {
     return (
@@ -151,12 +154,12 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
           href={`/project/${projectRef}/memory`}
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-3.5 w-3.5" /> Back to memories
+          <ChevronLeft className="h-3.5 w-3.5" /> {tr('memDetail.backToMemories')}
         </Link>
         <Card className="w-full max-w-2xl">
           <CardContent className="flex items-center gap-3 p-6">
             <AlertCircle className="h-5 w-5 text-destructive" />
-            <p className="text-sm">{error ?? 'Memory not found.'}</p>
+            <p className="text-sm">{error ?? trLoose('memDetail.notFound')}</p>
           </CardContent>
         </Card>
       </div>
@@ -172,16 +175,16 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
             href={`/project/${projectRef}/memory`}
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <ChevronLeft className="h-3.5 w-3.5" /> Back
+            <ChevronLeft className="h-3.5 w-3.5" /> {tr('memDetail.back')}
           </Link>
           <span className="font-mono text-xs text-muted-foreground">{memory.id}</span>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={loadMemory}>
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <RefreshCw className="h-3.5 w-3.5" /> {tr('memDetail.refresh')}
           </Button>
           <Button size="sm" variant="destructive" onClick={() => setConfirmDelete(true)}>
-            <Trash2 className="h-3.5 w-3.5" /> Delete
+            <Trash2 className="h-3.5 w-3.5" /> {tr('memDetail.delete')}
           </Button>
         </div>
       </header>
@@ -195,13 +198,13 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
               type="button"
               onClick={() => setTab(t)}
               className={
-                'border-b-2 px-1 py-2 capitalize ' +
+                'border-b-2 px-1 py-2 ' +
                 (tab === t
                   ? 'border-foreground text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground')
               }
             >
-              {t}
+              {trLoose(`memDetail.tab.${t}`)}
               {t === 'history' && history.length > 0 && (
                 <Badge variant="outline" className="ml-1.5 px-1 text-[10px]">{history.length}</Badge>
               )}
@@ -221,18 +224,18 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
             <Card>
               <CardContent className="space-y-2 p-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Memory</span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{tr('memDetail.memory')}</span>
                   {!editing ? (
                     <Button size="sm" variant="ghost" onClick={() => { setEditText(memory.memory); setEditing(true); }}>
-                      <Pencil className="h-3.5 w-3.5" /> Edit
+                      <Pencil className="h-3.5 w-3.5" /> {tr('memDetail.edit')}
                     </Button>
                   ) : (
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setEditText(memory.memory); }} disabled={saving}>
-                        <X className="h-3.5 w-3.5" /> Cancel
+                        <X className="h-3.5 w-3.5" /> {tr('memDetail.cancel')}
                       </Button>
                       <Button size="sm" onClick={saveEdit} disabled={saving}>
-                        <Save className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
+                        <Save className="h-3.5 w-3.5" /> {saving ? trLoose('memDetail.saving') : trLoose('memDetail.save')}
                       </Button>
                     </div>
                   )}
@@ -252,14 +255,14 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
             {/* Metadata */}
             <Card>
               <CardContent className="grid grid-cols-2 gap-3 p-4 text-xs sm:grid-cols-3">
-                <Meta label="User ID" value={memory.userId} mono />
-                <Meta label="Agent ID" value={memory.agentId} />
-                <Meta label="Run ID" value={memory.runId} />
-                <Meta label="Actor" value={memory.actorId} />
-                <Meta label="Role" value={memory.role} />
-                <Meta label="Created" value={formatDate(memory.createdAt)} />
-                <Meta label="Updated" value={formatDate(memory.updatedAt)} />
-                {memory.score != null && <Meta label="Score" value={memory.score.toFixed(3)} />}
+                <Meta label={tr('memDetail.userId')} value={memory.userId} mono />
+                <Meta label={tr('memDetail.agentId')} value={memory.agentId} />
+                <Meta label={tr('memDetail.runId')} value={memory.runId} />
+                <Meta label={tr('memDetail.actor')} value={memory.actorId} />
+                <Meta label={tr('memDetail.role')} value={memory.role} />
+                <Meta label={tr('memDetail.created')} value={formatDate(memory.createdAt)} />
+                <Meta label={tr('memDetail.updated')} value={formatDate(memory.updatedAt)} />
+                {memory.score != null && <Meta label={tr('memDetail.score')} value={memory.score.toFixed(3)} />}
               </CardContent>
             </Card>
 
@@ -268,7 +271,7 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
               <Card>
                 <CardContent className="p-4">
                   <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Metadata (JSON)
+                    {tr('memDetail.metadataJson')}
                   </div>
                   <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-[11px]">
                     {JSON.stringify(memory.metadata, null, 2)}
@@ -282,13 +285,13 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
         {tab === 'history' && (
           <div className="mx-auto max-w-3xl space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold"><History className="mr-1.5 inline h-3.5 w-3.5" /> Audit trail</h3>
+              <h3 className="text-sm font-semibold"><History className="mr-1.5 inline h-3.5 w-3.5" /> {tr('memDetail.auditTrail')}</h3>
               <Button size="sm" variant="outline" onClick={loadHistory}>
-                <RefreshCw className="h-3.5 w-3.5" /> Refresh
+                <RefreshCw className="h-3.5 w-3.5" /> {tr('memDetail.refresh')}
               </Button>
             </div>
             {history.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">No history yet.</p>
+              <p className="py-8 text-center text-xs text-muted-foreground">{tr('memDetail.noHistory')}</p>
             ) : (
               <ol className="space-y-2">
                 {history.map((h) => (
@@ -300,7 +303,7 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
                             <EventBadge event={h.event} />
                             <span className="text-[10px] text-muted-foreground">{formatDate(h.createdAt)}</span>
                             {h.actorId && (
-                              <span className="text-[10px] text-muted-foreground">by {h.actorId}</span>
+                              <span className="text-[10px] text-muted-foreground">{tr('memDetail.by')} {h.actorId}</span>
                             )}
                           </div>
                         </div>
@@ -334,14 +337,14 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
         {tab === 'entities' && (
           <div className="mx-auto max-w-3xl space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold"><Tag className="mr-1.5 inline h-3.5 w-3.5" /> Linked entities</h3>
+              <h3 className="text-sm font-semibold"><Tag className="mr-1.5 inline h-3.5 w-3.5" /> {tr('memDetail.linkedEntities')}</h3>
               <Button size="sm" variant="outline" onClick={loadEntities}>
-                <RefreshCw className="h-3.5 w-3.5" /> Refresh
+                <RefreshCw className="h-3.5 w-3.5" /> {tr('memDetail.refresh')}
               </Button>
             </div>
             {entities.length === 0 ? (
               <p className="py-8 text-center text-xs text-muted-foreground">
-                No entities link to this memory.
+                {tr('memDetail.noEntities')}
               </p>
             ) : (
               <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -361,7 +364,7 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
                           href={`/project/${projectRef}/memory/entities`}
                           className="text-[10px] text-muted-foreground hover:text-foreground"
                         >
-                          {(e.linkedMemoryIds?.length ?? 0)} link{(e.linkedMemoryIds?.length ?? 0) === 1 ? '' : 's'}
+                          {trLoose((e.linkedMemoryIds?.length ?? 0) === 1 ? 'memDetail.link' : 'memDetail.links', { n: e.linkedMemoryIds?.length ?? 0 })}
                         </Link>
                       </CardContent>
                     </Card>
@@ -375,13 +378,13 @@ function MemoryDetailInner({ projectRef, memoryId }: { projectRef: string; memor
 
       {/* Delete confirm */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogHeader>Delete memory?</DialogHeader>
+        <DialogHeader>{tr('memDetail.deleteTitle')}</DialogHeader>
         <DialogBody>
-          <p className="text-sm">This will soft-delete the memory and remove its entity links. The action is reversible only by direct DB intervention.</p>
+          <p className="text-sm">{tr('memDetail.deleteDesc')}</p>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={performDelete}>Delete</Button>
+          <Button variant="outline" onClick={() => setConfirmDelete(false)}>{tr('memDetail.cancel')}</Button>
+          <Button variant="destructive" onClick={performDelete}>{tr('memDetail.delete')}</Button>
         </DialogFooter>
       </Dialog>
     </div>

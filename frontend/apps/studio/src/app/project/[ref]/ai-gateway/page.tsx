@@ -33,6 +33,7 @@ import { apiFetch, API_BASE, type ApiError } from '@/lib/api';
 import { isProjectReady, useSession } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 type Tab = 'overview' | 'routes' | 'keys' | 'logs' | 'pricing';
 
@@ -132,13 +133,15 @@ const EMPTY_UPSTREAM = {
   description: '',
 };
 
-const TABS: { value: Tab; icon: LucideIcon; label: string }[] = [
-  { value: 'overview', icon: Activity, label: 'Overview' },
-  { value: 'routes', icon: Route, label: 'Routes' },
-  { value: 'keys', icon: KeyRound, label: 'API Keys' },
-  { value: 'logs', icon: SlidersHorizontal, label: 'Logs' },
-  { value: 'pricing', icon: WalletCards, label: 'Cost estimates' },
-];
+function getTabs(tr: (key: string, values?: Record<string, string | number>) => string): { value: Tab; icon: LucideIcon; label: string }[] {
+  return [
+    { value: 'overview', icon: Activity, label: tr('aiGateway.tabOverview') },
+    { value: 'routes', icon: Route, label: tr('aiGateway.tabRoutes') },
+    { value: 'keys', icon: KeyRound, label: tr('aiGateway.tabKeys') },
+    { value: 'logs', icon: SlidersHorizontal, label: tr('aiGateway.tabLogs') },
+    { value: 'pricing', icon: WalletCards, label: tr('aiGateway.tabPricing') },
+  ];
+}
 
 const PUBLIC_MODELS_URL = process.env.NEXT_PUBLIC_NUBASE_WEBSITE_URL
   ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3001/models' : '/models');
@@ -154,6 +157,9 @@ export default function AiGatewayPage({ params }: { params: { ref: string } }) {
 }
 
 function AiGatewayInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
+  // Loose wrapper to match helper function signatures
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
   const [tab, setTab] = useState<Tab>('overview');
@@ -182,7 +188,7 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
       setLogs(l.content);
       setPricing(p);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load AI Gateway.');
+      setError((err as ApiError).message ?? tr('aiGateway.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -204,9 +210,9 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
               <Bot className="h-4 w-4 text-brand" />
             </div>
             <div>
-              <h1 className="text-base font-semibold">AI Gateway</h1>
+              <h1 className="text-base font-semibold">{tr('aiGateway.title')}</h1>
               <p className="text-xs text-muted-foreground">
-                Project routing, keys, cost estimates and usage for <span className="font-mono">{projectRef}</span>.
+                {tr('aiGateway.subtitle', { ref: projectRef })}
               </p>
             </div>
           </div>
@@ -217,7 +223,7 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
               rel="noreferrer"
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
             >
-              Supported models
+              {tr('aiGateway.supportedModels')}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
             <code className="hidden rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground md:block">
@@ -225,12 +231,12 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
             </code>
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} />
-              Refresh
+              {tr('aiGateway.refresh')}
             </Button>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-1">
-          {TABS.map(({ value, icon: Icon, label }) => (
+          {getTabs(trLoose).map(({ value, icon: Icon, label }) => (
             <button
               key={value as string}
               type="button"
@@ -259,19 +265,19 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
         ) : null}
 
         {tab === 'overview' ? (
-          <OverviewPanel overview={overview} maxSeriesTokens={maxSeriesTokens} loading={loading} />
+          <OverviewPanel tr={trLoose} overview={overview} maxSeriesTokens={maxSeriesTokens} loading={loading} />
         ) : null}
         {tab === 'routes' ? (
-          <RoutesPanel apikey={apikey} rows={upstreams} onChanged={load} />
+          <RoutesPanel tr={trLoose} apikey={apikey} rows={upstreams} onChanged={load} />
         ) : null}
         {tab === 'keys' ? (
-          <KeysPanel apikey={apikey} rows={keys} onChanged={load} />
+          <KeysPanel tr={trLoose} apikey={apikey} rows={keys} onChanged={load} />
         ) : null}
         {tab === 'logs' ? (
-          <LogsPanel rows={logs} />
+          <LogsPanel tr={trLoose} rows={logs} />
         ) : null}
         {tab === 'pricing' ? (
-          <PricingPanel apikey={apikey} rows={pricing} onChanged={load} />
+          <PricingPanel tr={trLoose} apikey={apikey} rows={pricing} onChanged={load} />
         ) : null}
       </main>
     </div>
@@ -279,19 +285,21 @@ function AiGatewayInner({ projectRef }: { projectRef: string }) {
 }
 
 function OverviewPanel({
+  tr,
   overview,
   maxSeriesTokens,
   loading,
 }: {
+  tr: (key: string, values?: Record<string, string | number>) => string;
   overview: UsageOverview | null;
   maxSeriesTokens: number;
   loading: boolean;
 }) {
   const cards = [
-    ['Requests', overview?.totalRequests ?? 0],
-    ['Tokens', overview?.totalTokens ?? 0],
-    ['Cost USD', `$${Number(overview?.totalCostUsd ?? 0).toFixed(4)}`],
-    ['Avg first token', `${overview?.avgFirstTokenLatencyMs ?? 0} ms`],
+    [tr('aiGateway.requests'), overview?.totalRequests ?? 0],
+    [tr('aiGateway.tokens'), overview?.totalTokens ?? 0],
+    [tr('aiGateway.costUsd'), `$${Number(overview?.totalCostUsd ?? 0).toFixed(4)}`],
+    [tr('aiGateway.avgFirstToken'), `${overview?.avgFirstTokenLatencyMs ?? 0} ms`],
   ];
   return (
     <div className="space-y-5">
@@ -309,10 +317,10 @@ function OverviewPanel({
         <CardContent className="p-4">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold">14 day trend</h2>
-              <p className="text-xs text-muted-foreground">Token volume by day.</p>
+              <h2 className="text-sm font-semibold">{tr('aiGateway.trend')}</h2>
+              <p className="text-xs text-muted-foreground">{tr('aiGateway.trendDesc')}</p>
             </div>
-            {loading ? <Badge variant="outline">Loading</Badge> : null}
+            {loading ? <Badge variant="outline">{tr('aiGateway.loading')}</Badge> : null}
           </div>
           <div className="flex h-56 items-end gap-2">
             {(overview?.series ?? []).map((point) => (
@@ -334,22 +342,23 @@ function OverviewPanel({
   );
 }
 
-function RoutesPanel({ apikey, rows, onChanged }: { apikey: string; rows: Upstream[]; onChanged: () => void }) {
+function RoutesPanel({ tr, apikey, rows, onChanged }: { tr: (key: string, values?: Record<string, string | number>) => string; apikey: string; rows: Upstream[]; onChanged: () => void }) {
   const [editing, setEditing] = useState<Upstream | null>(null);
   const [creating, setCreating] = useState(false);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold">Routes</h2>
-          <p className="text-xs text-muted-foreground">Priority ordered upstreams with failover.</p>
+          <h2 className="text-sm font-semibold">{tr('aiGateway.routesTitle')}</h2>
+          <p className="text-xs text-muted-foreground">{tr('aiGateway.routesDesc')}</p>
         </div>
         <Button size="sm" variant="brand" onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5" /> New route
+          <Plus className="h-3.5 w-3.5" /> {tr('aiGateway.newRoute')}
         </Button>
       </div>
       <Table
-        headers={['Name', 'Provider', 'Channel', 'Models', 'Priority', 'Status', '']}
+        emptyText={tr('aiGateway.noRecords')}
+        headers={[tr('aiGateway.colName'), tr('aiGateway.colProvider'), tr('aiGateway.colChannel'), tr('aiGateway.colModels'), tr('aiGateway.colPriority'), tr('aiGateway.colStatus'), '']}
         rows={rows.map((r) => [
           <div key="name">
             <p className="font-medium">{r.name}</p>
@@ -362,10 +371,11 @@ function RoutesPanel({ apikey, rows, onChanged }: { apikey: string; rows: Upstre
           </span>,
           String(r.priority),
           <StatusBadge key="status" active={r.isActive} label={r.isDefault ? 'default' : r.healthStatus ?? 'active'} />,
-          <Button key="edit" size="sm" variant="outline" onClick={() => setEditing(r)}>Edit</Button>,
+          <Button key="edit" size="sm" variant="outline" onClick={() => setEditing(r)}>{tr('aiGateway.edit')}</Button>,
         ])}
       />
       <RouteDialog
+        tr={tr}
         open={creating || Boolean(editing)}
         route={editing}
         apikey={apikey}
@@ -377,12 +387,14 @@ function RoutesPanel({ apikey, rows, onChanged }: { apikey: string; rows: Upstre
 }
 
 function RouteDialog({
+  tr,
   open,
   route,
   apikey,
   onClose,
   onSaved,
 }: {
+  tr: (key: string, values?: Record<string, string | number>) => string;
   open: boolean;
   route: Upstream | null;
   apikey: string;
@@ -436,7 +448,7 @@ function RouteDialog({
       onSaved();
       onClose();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Save failed.');
+      setError((err as ApiError).message ?? tr('aiGateway.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -444,41 +456,41 @@ function RouteDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="max-w-2xl">
-      <DialogHeader title={route ? 'Edit route' : 'New route'} description="Auth token is write-only and never returned by the API." onClose={onClose} />
+      <DialogHeader title={route ? tr('aiGateway.editRoute') : tr('aiGateway.newRouteTitle')} description={tr('aiGateway.routeDesc')} onClose={onClose} />
       <DialogBody className="grid gap-3 md:grid-cols-2">
-        <Field label="Name" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
-        <Field label="Provider" value={draft.provider} onChange={(v) => setDraft({ ...draft, provider: v })} />
-        <Field label="Channel" value={draft.channelCode} onChange={(v) => setDraft({ ...draft, channelCode: v })} />
-        <Field label="Priority" type="number" value={String(draft.priority)} onChange={(v) => setDraft({ ...draft, priority: Number(v) })} />
-        <Field className="md:col-span-2" label="Base URL" value={draft.baseUrl} onChange={(v) => setDraft({ ...draft, baseUrl: v })} />
-        <Field className="md:col-span-2" label={route?.authTokenSet ? 'Auth token (leave blank to keep)' : 'Auth token'} type="password" value={draft.authToken} onChange={(v) => setDraft({ ...draft, authToken: v })} />
-        <Field label="Timeout ms" type="number" value={String(draft.timeoutMs)} onChange={(v) => setDraft({ ...draft, timeoutMs: Number(v) })} />
-        <Field label="Max input tokens" value={draft.maxInputTokens} onChange={(v) => setDraft({ ...draft, maxInputTokens: v })} />
-        <Field className="md:col-span-2" label="Supported models" value={draft.supportedModels} onChange={(v) => setDraft({ ...draft, supportedModels: v })} />
+        <Field label={tr('aiGateway.fieldName')} value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
+        <Field label={tr('aiGateway.fieldProvider')} value={draft.provider} onChange={(v) => setDraft({ ...draft, provider: v })} />
+        <Field label={tr('aiGateway.fieldChannel')} value={draft.channelCode} onChange={(v) => setDraft({ ...draft, channelCode: v })} />
+        <Field label={tr('aiGateway.fieldPriority')} type="number" value={String(draft.priority)} onChange={(v) => setDraft({ ...draft, priority: Number(v) })} />
+        <Field className="md:col-span-2" label={tr('aiGateway.fieldBaseUrl')} value={draft.baseUrl} onChange={(v) => setDraft({ ...draft, baseUrl: v })} />
+        <Field className="md:col-span-2" label={route?.authTokenSet ? tr('aiGateway.fieldAuthToken') : tr('aiGateway.fieldAuthToken')} type="password" value={draft.authToken} onChange={(v) => setDraft({ ...draft, authToken: v })} />
+        <Field label={tr('aiGateway.fieldTimeout')} type="number" value={String(draft.timeoutMs)} onChange={(v) => setDraft({ ...draft, timeoutMs: Number(v) })} />
+        <Field label={tr('aiGateway.fieldMaxInput')} value={draft.maxInputTokens} onChange={(v) => setDraft({ ...draft, maxInputTokens: v })} />
+        <Field className="md:col-span-2" label={tr('aiGateway.fieldModels')} value={draft.supportedModels} onChange={(v) => setDraft({ ...draft, supportedModels: v })} />
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={draft.isDefault} onChange={(e) => setDraft({ ...draft, isDefault: e.target.checked })} />
-          Default route
+          {tr('aiGateway.defaultRoute')}
         </label>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={draft.isActive} onChange={(e) => setDraft({ ...draft, isActive: e.target.checked })} />
-          Active
+          {tr('aiGateway.active')}
         </label>
         {error ? <p className="md:col-span-2 text-xs text-destructive">{error}</p> : null}
       </DialogBody>
       <DialogFooter>
-        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button variant="outline" onClick={onClose}>{tr('aiGateway.cancel')}</Button>
         <Button variant="brand" onClick={save} disabled={saving}>
-          <Save className="h-3.5 w-3.5" /> Save
+          <Save className="h-3.5 w-3.5" /> {tr('aiGateway.save')}
         </Button>
       </DialogFooter>
     </Dialog>
   );
 }
 
-function KeysPanel({ apikey, rows, onChanged }: { apikey: string; rows: GatewayKey[]; onChanged: () => void }) {
+function KeysPanel({ tr, apikey, rows, onChanged }: { tr: (key: string, values?: Record<string, string | number>) => string; apikey: string; rows: GatewayKey[]; onChanged: () => void }) {
   const [newKey, setNewKey] = useState<string | null>(null);
   const issue = async () => {
-    const name = window.prompt('Key name');
+    const name = window.prompt(tr('aiGateway.colKeyName'));
     if (!name) return;
     const res = await apiFetch<GatewayKey>('/ai-gateway/admin/v1/keys', {
       apikey,
@@ -489,7 +501,7 @@ function KeysPanel({ apikey, rows, onChanged }: { apikey: string; rows: GatewayK
     onChanged();
   };
   const revoke = async (id: number) => {
-    if (!window.confirm('Revoke this key?')) return;
+    if (!window.confirm(tr('aiGateway.revokeConfirm'))) return;
     await apiFetch(`/ai-gateway/admin/v1/keys/${id}`, { apikey, method: 'DELETE' });
     onChanged();
   };
@@ -497,18 +509,18 @@ function KeysPanel({ apikey, rows, onChanged }: { apikey: string; rows: GatewayK
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold">API Keys</h2>
-          <p className="text-xs text-muted-foreground">Self-routing keys for CLI and server-side AI calls.</p>
+          <h2 className="text-sm font-semibold">{tr('aiGateway.keysTitle')}</h2>
+          <p className="text-xs text-muted-foreground">{tr('aiGateway.keysDesc')}</p>
         </div>
         <Button size="sm" variant="brand" onClick={issue}>
-          <Plus className="h-3.5 w-3.5" /> Issue key
+          <Plus className="h-3.5 w-3.5" /> {tr('aiGateway.issueKey')}
         </Button>
       </div>
       {newKey ? (
         <Card>
           <CardContent className="flex items-center justify-between gap-3 p-4">
             <div>
-              <p className="text-xs font-medium">Copy this key now. It will not be shown again.</p>
+              <p className="text-xs font-medium">{tr('aiGateway.keyNotice')}</p>
               <code className="mt-2 block break-all rounded-md bg-muted p-2 text-xs">{newKey}</code>
             </div>
             <Button size="icon" variant="outline" onClick={() => navigator.clipboard.writeText(newKey)}>
@@ -518,15 +530,16 @@ function KeysPanel({ apikey, rows, onChanged }: { apikey: string; rows: GatewayK
         </Card>
       ) : null}
       <Table
-        headers={['Name', 'Prefix', 'Created', 'Last used', 'Status', '']}
+        headers={[tr('aiGateway.colKeyName'), tr('aiGateway.colPrefix'), tr('aiGateway.colCreated'), tr('aiGateway.colLastUsed'), tr('aiGateway.colKeyStatus'), '']}
+        emptyText={tr('aiGateway.noRecords')}
         rows={rows.map((k) => [
-          k.name ?? 'Untitled',
+          k.name ?? tr('aiGateway.untitled'),
           <code key="prefix" className="text-xs">{k.prefix ?? '-'}</code>,
           formatDate(k.createdAt),
           formatDate(k.lastUsedAt),
-          <StatusBadge key="status" active={k.isActive && !k.revokedAt} label={k.revokedAt ? 'revoked' : 'active'} />,
+          <StatusBadge key="status" active={k.isActive && !k.revokedAt} label={k.revokedAt ? tr('aiGateway.revokedStatus') : tr('aiGateway.activeStatus')} />,
           <Button key="revoke" size="sm" variant="outline" onClick={() => revoke(k.id)}>
-            <Trash2 className="h-3.5 w-3.5" /> Revoke
+            <Trash2 className="h-3.5 w-3.5" /> {tr('aiGateway.revoke')}
           </Button>,
         ])}
       />
@@ -534,15 +547,16 @@ function KeysPanel({ apikey, rows, onChanged }: { apikey: string; rows: GatewayK
   );
 }
 
-function LogsPanel({ rows }: { rows: UsageLog[] }) {
+function LogsPanel({ tr, rows }: { tr: (key: string, values?: Record<string, string | number>) => string; rows: UsageLog[] }) {
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-sm font-semibold">Request logs</h2>
-        <p className="text-xs text-muted-foreground">Recent gateway requests, including API-key and user-JWT calls.</p>
+        <h2 className="text-sm font-semibold">{tr('aiGateway.logsTitle')}</h2>
+        <p className="text-xs text-muted-foreground">{tr('aiGateway.logsDesc')}</p>
       </div>
       <Table
-        headers={['When', 'Model', 'Endpoint', 'Auth', 'Status', 'Tokens', 'Cost', 'Latency']}
+        headers={[tr('aiGateway.colWhen'), tr('aiGateway.colModel'), tr('aiGateway.colEndpoint'), tr('aiGateway.colAuth'), tr('aiGateway.colStatus'), tr('aiGateway.colTokens'), tr('aiGateway.colCost'), tr('aiGateway.colLatency')]}
+        emptyText={tr('aiGateway.noRecords')}
         rows={rows.map((l) => [
           formatDate(l.createdAt),
           l.model ?? '-',
@@ -558,7 +572,7 @@ function LogsPanel({ rows }: { rows: UsageLog[] }) {
   );
 }
 
-function PricingPanel({ apikey, rows, onChanged }: { apikey: string; rows: Pricing[]; onChanged: () => void }) {
+function PricingPanel({ tr, apikey, rows, onChanged }: { tr: (key: string, values?: Record<string, string | number>) => string; apikey: string; rows: Pricing[]; onChanged: () => void }) {
   const toggle = async (p: Pricing) => {
     await apiFetch(`/ai-gateway/admin/v1/pricing/${p.id}`, {
       apikey,
@@ -570,22 +584,23 @@ function PricingPanel({ apikey, rows, onChanged }: { apikey: string; rows: Prici
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-sm font-semibold">Project cost estimates</h2>
+        <h2 className="text-sm font-semibold">{tr('aiGateway.pricingTitle')}</h2>
         <p className="text-xs text-muted-foreground">
-          Used for project-level cost analytics only. Does not affect customer billing.
+          {tr('aiGateway.pricingDesc')}
         </p>
       </div>
       <Table
-        headers={['Model', 'Provider', 'Input / 1M', 'Output / 1M', 'Currency', 'Status', '']}
+        headers={[tr('aiGateway.colPricingModel'), tr('aiGateway.colPricingProvider'), tr('aiGateway.colInput'), tr('aiGateway.colOutput'), tr('aiGateway.colCurrency'), tr('aiGateway.colPricingStatus'), '']}
+        emptyText={tr('aiGateway.noRecords')}
         rows={rows.map((p) => [
           p.displayName || p.model,
           p.provider,
           `$${Number(p.inputPricePer1MUsd ?? 0).toFixed(4)}`,
           `$${Number(p.outputPricePer1MUsd ?? 0).toFixed(4)}`,
           p.currency,
-          <StatusBadge key="status" active={p.isActive} label={p.isActive ? 'active' : 'inactive'} />,
+          <StatusBadge key="status" active={p.isActive} label={p.isActive ? tr('aiGateway.activeStatus') : tr('aiGateway.inactive')} />,
           <Button key="toggle" size="sm" variant="outline" onClick={() => toggle(p)}>
-            {p.isActive ? 'Disable' : 'Enable'}
+            {p.isActive ? tr('aiGateway.disable') : tr('aiGateway.enable')}
           </Button>,
         ])}
       />
@@ -618,7 +633,7 @@ function StatusBadge({ active, label }: { active: boolean; label: string }) {
   return <Badge variant={active ? 'success' : 'warning'}>{label}</Badge>;
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][] }) {
+function Table({ headers, rows, emptyText }: { headers: string[]; rows: React.ReactNode[][]; emptyText: string }) {
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <table className="w-full text-sm">
@@ -631,7 +646,7 @@ function Table({ headers, rows }: { headers: string[]; rows: React.ReactNode[][]
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan={headers.length} className="px-3 py-10 text-center text-xs text-muted-foreground">No records.</td></tr>
+            <tr><td colSpan={headers.length} className="px-3 py-10 text-center text-xs text-muted-foreground">{emptyText}</td></tr>
           ) : rows.map((row, i) => (
             <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-accent/20">
               {row.map((cell, j) => (

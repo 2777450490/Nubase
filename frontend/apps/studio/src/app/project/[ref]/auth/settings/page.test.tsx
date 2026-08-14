@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import type { TenantAuthConfig } from '@/lib/auth-types';
+import type { TenantAuthConfig } from '../../../../../lib/auth-types';
 import AuthSettingsPage from './page';
+import { I18nProvider } from '../../../../../lib/i18n';
 
 // ---- module mocks (hoisted by vitest) ----
-vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
-vi.mock('@/lib/session', () => ({
+vi.mock('../../../../../lib/api', () => ({ apiFetch: vi.fn() }));
+vi.mock('../../../../../lib/session', () => ({
   useSession: () => ({ project: { ref: 'demo', apikey: 'KEY', initStatus: 'INITIALIZED' } }),
   isProjectReady: () => true,
 }));
@@ -17,7 +18,7 @@ vi.mock('@nubase/ui', () => ({
   CardContent: (p: any) => <div>{p.children}</div>,
 }));
 
-import { apiFetch } from '@/lib/api';
+import { apiFetch } from '../../../../../lib/api';
 
 const effective: TenantAuthConfig = {
   mfa: { enabled: true, issuer: 'Nubase', digits: 6, period: 30, allowedDrift: 1, maxEnrolledFactors: 10, challengeExpiration: 300 },
@@ -41,7 +42,7 @@ describe('AuthSettingsPage', () => {
   });
 
   it('loads the effective config on mount and renders the setting groups', async () => {
-    render(<AuthSettingsPage params={{ ref: 'demo' }} />);
+    render(<I18nProvider><AuthSettingsPage params={{ ref: 'demo' }} /></I18nProvider>);
 
     expect(await screen.findByText('Disable public sign-up')).toBeInTheDocument();
     expect(screen.getByText('Multi-factor authentication (TOTP / phone)')).toBeInTheDocument();
@@ -50,12 +51,12 @@ describe('AuthSettingsPage', () => {
   });
 
   it('PUTs the updated config when a field is changed and Save is clicked', async () => {
-    render(<AuthSettingsPage params={{ ref: 'demo' }} />);
+    render(<I18nProvider><AuthSettingsPage params={{ ref: 'demo' }} /></I18nProvider>);
     await screen.findByText('Disable public sign-up');
 
     // toggle the first boolean (Disable public sign-up) → makes the form dirty
     const checkboxes = screen.getAllByRole('checkbox');
-    fireEvent.click(checkboxes[0]);
+    fireEvent.click(checkboxes[0]!);
 
     const save = screen.getByRole('button', { name: /Save/ });
     expect(save).not.toBeDisabled();

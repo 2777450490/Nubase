@@ -18,6 +18,7 @@ import { apiFetch, API_BASE, type ApiError } from '@/lib/api';
 import { isProjectReady, useSession } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface AssetFile {
   path: string;
@@ -49,6 +50,7 @@ export default function AssetsPage({ params }: { params: { ref: string } }) {
 }
 
 function AssetsInner() {
+  const { tr } = useI18n();
   const { project } = useSession();
   const apikey = project!.apikey;
   const [files, setFiles] = useState<AssetFile[]>([]);
@@ -69,7 +71,7 @@ function AssetsInner() {
       const res = await apiFetch<AssetFile[]>(`/assets/admin/v1/files${qs ? `?${qs}` : ''}`, { apikey });
       setFiles(res ?? []);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load assets.');
+      setError((err as ApiError).message ?? tr('assets.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -80,14 +82,14 @@ function AssetsInner() {
   }, [load]);
 
   async function remove(path: string) {
-    if (!window.confirm(`Delete asset "${path}"? Cached copies on CDNs may persist until they expire.`)) {
+    if (!window.confirm(tr('assets.deleteConfirm', { path }))) {
       return;
     }
     try {
       await apiFetch(`/assets/admin/v1/files/${encodeAssetPath(path)}`, { method: 'DELETE', apikey });
       load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? tr('assets.deleteFailed'));
     }
   }
 
@@ -105,24 +107,24 @@ function AssetsInner() {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">Assets</h2>
-          <Badge variant="outline">{files.length} total</Badge>
+          <h2 className="text-sm font-semibold">{tr('assets.title')}</h2>
+          <Badge variant="outline">{tr('assets.total', { n: files.length })}</Badge>
         </div>
         <div className="flex items-center gap-2">
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search path…"
+            placeholder={tr('assets.search')}
             className="h-8 w-48"
           />
           <Button size="sm" variant="outline" onClick={load}>
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <RefreshCw className="h-3.5 w-3.5" /> {tr('assets.refresh')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
-            <Settings2 className="h-3.5 w-3.5" /> Settings
+            <Settings2 className="h-3.5 w-3.5" /> {tr('assets.settings')}
           </Button>
           <Button size="sm" onClick={() => setUploading(true)}>
-            <Upload className="h-3.5 w-3.5" /> Upload
+            <Upload className="h-3.5 w-3.5" /> {tr('assets.upload')}
           </Button>
         </div>
       </header>
@@ -133,17 +135,14 @@ function AssetsInner() {
             <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
           </Card>
         ) : loading ? (
-          <p className="text-sm text-muted-foreground">Loading assets…</p>
+          <p className="text-sm text-muted-foreground">{tr('assets.loading')}</p>
         ) : files.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
               <FileBox className="h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                No assets yet. Upload static files (images, css, js) and serve them from your
-                project&apos;s public CDN endpoint.
-              </p>
+              <p className="text-sm text-muted-foreground">{tr('assets.empty')}</p>
               <Button size="sm" onClick={() => setUploading(true)}>
-                Upload your first asset
+                {tr('assets.uploadFirst')}
               </Button>
             </CardContent>
           </Card>
@@ -153,11 +152,11 @@ function AssetsInner() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-2 font-medium">Path</th>
-                    <th className="px-4 py-2 font-medium">Type</th>
-                    <th className="px-4 py-2 font-medium">Size</th>
-                    <th className="px-4 py-2 font-medium">Cache-Control</th>
-                    <th className="px-4 py-2 font-medium">Updated</th>
+                    <th className="px-4 py-2 font-medium">{tr('assets.colPath')}</th>
+                    <th className="px-4 py-2 font-medium">{tr('assets.colType')}</th>
+                    <th className="px-4 py-2 font-medium">{tr('assets.colSize')}</th>
+                    <th className="px-4 py-2 font-medium">{tr('assets.colCache')}</th>
+                    <th className="px-4 py-2 font-medium">{tr('assets.colUpdated')}</th>
                     <th className="px-4 py-2" />
                   </tr>
                 </thead>
@@ -168,7 +167,7 @@ function AssetsInner() {
                       <td className="px-4 py-2 text-xs text-muted-foreground">{f.contentType ?? '—'}</td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">{formatBytes(f.sizeBytes)}</td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">
-                        {f.cacheControl ?? <span className="italic">project default</span>}
+                        {f.cacheControl ?? <span className="italic">{tr('assets.projectDefault')}</span>}
                       </td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">
                         {f.updatedAt ? new Date(f.updatedAt).toLocaleString() : '—'}
@@ -178,21 +177,21 @@ function AssetsInner() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            title="Copy public URL"
+                            title={tr('assets.copyUrl')}
                             onClick={() => copyUrl(f)}
                           >
                             <Copy className="h-3.5 w-3.5" />
-                            {copiedPath === f.path ? ' Copied' : null}
+                            {copiedPath === f.path ? ` ${tr('assets.copied')}` : null}
                           </Button>
                           <a href={f.publicUrl} target="_blank" rel="noreferrer">
-                            <Button size="sm" variant="ghost" title="Open">
+                            <Button size="sm" variant="ghost" title={tr('assets.open')}>
                               <ExternalLink className="h-3.5 w-3.5" />
                             </Button>
                           </a>
                           <Button
                             size="sm"
                             variant="ghost"
-                            title="Delete"
+                            title={tr('assets.delete')}
                             onClick={() => remove(f.path)}
                           >
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -234,6 +233,7 @@ function UploadDialog({
   onUploaded: () => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const { tr } = useI18n();
   const [file, setFile] = useState<File | null>(null);
   const [path, setPath] = useState('');
   const [cacheControl, setCacheControl] = useState('');
@@ -260,12 +260,12 @@ function UploadDialog({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) {
-      setError('Choose a file to upload.');
+      setError(tr('assets.uploadNoFile'));
       return;
     }
     const targetPath = normalizeAssetPath(path || file.name);
     if (!targetPath) {
-      setError('Target path is required.');
+      setError(tr('assets.uploadNoPath'));
       return;
     }
     setSubmitting(true);
@@ -291,7 +291,7 @@ function UploadDialog({
       }
       onUploaded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.');
+      setError(err instanceof Error ? err.message : tr('assets.uploadFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -299,11 +299,11 @@ function UploadDialog({
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogHeader title="Upload asset" onClose={onClose} />
+      <DialogHeader title={tr('assets.uploadTitle')} onClose={onClose} />
       <form onSubmit={submit}>
         <DialogBody className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="asset-file">File</Label>
+            <Label htmlFor="asset-file">{tr('assets.uploadFile')}</Label>
             <Input
               id="asset-file"
               ref={fileInput}
@@ -312,7 +312,7 @@ function UploadDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="asset-path">Target path</Label>
+            <Label htmlFor="asset-path">{tr('assets.uploadTargetPath')}</Label>
             <Input
               id="asset-path"
               value={path}
@@ -320,31 +320,26 @@ function UploadDialog({
               placeholder="img/logo.png"
               className="font-mono"
             />
-            <p className="text-[10px] text-muted-foreground">
-              Served at /assets/v1/&lt;path&gt;. Letters, digits, &apos;.&apos;, &apos;_&apos;,
-              &apos;-&apos; and &apos;/&apos; only. Uploading to an existing path overwrites it.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{tr('assets.uploadTargetHelp')}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="asset-cache">Cache-Control (optional)</Label>
+            <Label htmlFor="asset-cache">{tr('assets.uploadCache')}</Label>
             <Input
               id="asset-cache"
               value={cacheControl}
               onChange={(e) => setCacheControl(e.target.value)}
               placeholder="31536000 or public, max-age=31536000, immutable"
             />
-            <p className="text-[10px] text-muted-foreground">
-              Plain seconds become max-age=N. Leave empty to use the project default.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{tr('assets.uploadCacheHelp')}</p>
           </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('assets.cancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Uploading…' : 'Upload'}
+            {submitting ? tr('assets.uploading') : tr('assets.uploadBtn')}
           </Button>
         </DialogFooter>
       </form>
@@ -362,6 +357,7 @@ function SettingsDialog({
   onClose: () => void;
 }) {
   const [settings, setSettings] = useState<AssetSettings | null>(null);
+  const { tr } = useI18n();
   const [defaultCacheControl, setDefaultCacheControl] = useState('');
   const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -376,7 +372,7 @@ function SettingsDialog({
         setDefaultCacheControl(s.defaultCacheControl ?? '');
         setCustomBaseUrl(s.customBaseUrl ?? '');
       })
-      .catch((err) => setError((err as ApiError).message ?? 'Failed to load settings.'));
+      .catch((err) => setError((err as ApiError).message ?? tr('assets.loadSettingsFailed')));
   }, [open, apikey]);
 
   async function submit(e: React.FormEvent) {
@@ -394,7 +390,7 @@ function SettingsDialog({
       });
       onClose();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Save failed.');
+      setError((err as ApiError).message ?? tr('assets.saveFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -402,47 +398,42 @@ function SettingsDialog({
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogHeader title="Asset delivery settings" onClose={onClose} />
+      <DialogHeader title={tr('assets.settingsTitle')} onClose={onClose} />
       <form onSubmit={submit}>
         <DialogBody className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="settings-cache">Default Cache-Control</Label>
+            <Label htmlFor="settings-cache">{tr('assets.settingsCache')}</Label>
             <Input
               id="settings-cache"
               value={defaultCacheControl}
               onChange={(e) => setDefaultCacheControl(e.target.value)}
               placeholder="public, max-age=3600"
             />
-            <p className="text-[10px] text-muted-foreground">
-              Applied to assets without a per-file override.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{tr('assets.settingsCacheHelp')}</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="settings-base">Custom CDN base URL (optional)</Label>
+            <Label htmlFor="settings-base">{tr('assets.settingsBase')}</Label>
             <Input
               id="settings-base"
               value={customBaseUrl}
               onChange={(e) => setCustomBaseUrl(e.target.value)}
               placeholder="https://cdn.myapp.io"
             />
-            <p className="text-[10px] text-muted-foreground">
-              Point your own CDN/domain at this project&apos;s assets, and public URLs become
-              &lt;base&gt;/&lt;path&gt;. Leave empty to use the platform CDN.
-            </p>
+            <p className="text-[10px] text-muted-foreground">{tr('assets.settingsBaseHelp')}</p>
           </div>
           {settings ? (
             <p className="text-[10px] text-muted-foreground">
-              Max asset size: {formatBytes(settings.effectiveMaxFileSizeBytes)}
+              {tr('assets.maxSize', { size: formatBytes(settings.effectiveMaxFileSizeBytes) })}
             </p>
           ) : null}
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('assets.cancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save'}
+            {submitting ? tr('assets.saving') : tr('assets.save')}
           </Button>
         </DialogFooter>
       </form>

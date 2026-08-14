@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Brain, Tag, Settings as SettingsIcon } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 /**
  * Horizontal sub-nav shared by the three pages under /project/[ref]/memory/*.
@@ -17,15 +18,17 @@ export function MemorySubNav({
   projectRef: string;
   active: 'memories' | 'entities' | 'settings';
 }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string) => tr(key as any);
   const items: Array<{
     key: 'memories' | 'entities' | 'settings';
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
   }> = [
-    { key: 'memories', label: 'Memories', href: `/project/${projectRef}/memory`, icon: Brain },
-    { key: 'entities', label: 'Entities', href: `/project/${projectRef}/memory/entities`, icon: Tag },
-    { key: 'settings', label: 'Settings', href: `/project/${projectRef}/memory/settings`, icon: SettingsIcon },
+    { key: 'memories', label: tr('memory.memories'), href: `/project/${projectRef}/memory`, icon: Brain },
+    { key: 'entities', label: tr('memory.entities'), href: `/project/${projectRef}/memory/entities`, icon: Tag },
+    { key: 'settings', label: trLoose('memory.settings'), href: `/project/${projectRef}/memory/settings`, icon: SettingsIcon },
   ];
   return (
     <nav className="border-b border-border px-4">

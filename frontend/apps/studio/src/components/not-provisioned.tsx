@@ -14,6 +14,7 @@ import {
 } from '@/lib/project-provisioning';
 import { useSession, type ProjectContext } from '@/lib/session';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface NotProvisionedProps {
   projectRef: string;
@@ -36,6 +37,7 @@ export function NotProvisioned({
   projectRef,
   initStatus,
 }: NotProvisionedProps) {
+  const { tr } = useI18n();
   const router = useRouter();
   const { platformKey, project, setProject } = useSession();
   const resolvedProjectRef = useProjectRef(projectRef);
@@ -94,16 +96,16 @@ export function NotProvisioned({
       if (controller.signal.aborted || runId !== runIdRef.current) return;
       if (err instanceof ProjectProvisioningFailedError) {
         setObservedStatus(err.status.initStatus);
-        setFailure({ kind: 'database', message: err.message });
+        setFailure({ kind: 'database', message: err.status.initMessage ?? tr('notProvisioned.titleDB') });
       } else if (err instanceof ProjectProvisioningTimeoutError) {
         setObservedStatus(err.lastStatus.initStatus);
-        setFailure({ kind: 'monitoring', message: err.message });
+        setFailure({ kind: 'monitoring', message: tr('notProvisioned.monitorTimeout') });
       } else {
         setFailure({
           kind: 'request',
           message:
             (err as ApiError).message ??
-            'Unable to start or monitor provisioning.',
+            tr('notProvisioned.startFailed'),
         });
       }
     } finally {
@@ -128,14 +130,14 @@ export function NotProvisioned({
   const currentStatus = observedStatus ?? initStatus ?? 'unknown';
   const failureTitle =
     failure?.kind === 'database'
-      ? 'Database provisioning failed'
+      ? tr('notProvisioned.titleDB')
       : failure?.kind === 'monitoring'
-        ? 'Database provisioning is taking longer than expected'
-        : 'Unable to monitor database provisioning';
+        ? tr('notProvisioned.titleSlow')
+        : tr('notProvisioned.titleMonitor');
   const failureDescription =
     failure?.kind === 'database'
-      ? 'Postgres reported an initialization failure. Retry after resolving the persisted error below.'
-      : 'The backend may still be provisioning this project. Checking again is safe and will not start a duplicate worker.';
+      ? tr('notProvisioned.descDB')
+      : tr('notProvisioned.descMonitor');
 
   return (
     <div className="p-8">
@@ -146,8 +148,8 @@ export function NotProvisioned({
               <CloudOff className="h-8 w-8 text-muted-foreground" />
               <h2 className="text-lg font-semibold">{failureTitle}</h2>
               <p className="max-w-md text-sm text-muted-foreground">
-                This project is in state{' '}
-                <code className="font-mono text-xs">{currentStatus}</code>.{' '}
+                {tr('notProvisioned.state', { status: currentStatus })}
+                {' '}
                 {failureDescription}
               </p>
               <p className="max-w-md text-xs text-destructive">
@@ -156,11 +158,11 @@ export function NotProvisioned({
               <div className="flex gap-2 pt-2">
                 <Button size="sm" onClick={provision} disabled={running}>
                   <Zap className="h-3.5 w-3.5" />
-                  {failure?.kind === 'database' ? 'Retry' : 'Check status'}
+                  {failure?.kind === 'database' ? tr('notProvisioned.retry') : tr('notProvisioned.checkStatus')}
                 </Button>
                 <Link href={`/project/${resolvedProjectRef}/settings`}>
                   <Button variant="outline" size="sm">
-                    Open settings
+                    {tr('notProvisioned.openSettings')}
                   </Button>
                 </Link>
               </div>
@@ -168,13 +170,9 @@ export function NotProvisioned({
           ) : (
             <>
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Initializing database…</h2>
+              <h2 className="text-lg font-semibold">{tr('notProvisioned.initializing')}</h2>
               <p className="max-w-md text-sm text-muted-foreground">
-                Provisioning the Postgres database and running the auth/storage
-                schema for{' '}
-                <code className="font-mono text-xs">{resolvedProjectRef}</code>.
-                This can take a few minutes — the Database, Auth and Storage
-                pages will populate automatically once it&apos;s done.
+                {tr('notProvisioned.initializingDesc', { ref: resolvedProjectRef })}
               </p>
             </>
           )}

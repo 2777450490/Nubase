@@ -19,6 +19,7 @@ import { apiFetch, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface Bucket {
   id: string;
@@ -43,6 +44,7 @@ export default function StorageBucketsPage({ params }: { params: { ref: string }
 
 function StorageBucketsInner() {
   const { project } = useSession();
+  const { tr } = useI18n();
   const apikey = project!.apikey;
   const projectRef = project!.ref;
   const [buckets, setBuckets] = useState<Bucket[]>([]);
@@ -57,7 +59,7 @@ function StorageBucketsInner() {
       const res = await apiFetch<Bucket[]>('/storage/v1/bucket', { apikey });
       setBuckets(res ?? []);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load buckets.');
+      setError((err as ApiError).message ?? tr('storage.empty'));
     } finally {
       setLoading(false);
     }
@@ -71,15 +73,15 @@ function StorageBucketsInner() {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">Buckets</h2>
-          <Badge variant="outline">{buckets.length} total</Badge>
+          <h2 className="text-sm font-semibold">{tr('storage.title')}</h2>
+          <Badge variant="outline">{tr('storage.total', { n: buckets.length })}</Badge>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={load}>
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <RefreshCw className="h-3.5 w-3.5" /> {tr('storage.refresh')}
           </Button>
           <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus className="h-3.5 w-3.5" /> New bucket
+            <Plus className="h-3.5 w-3.5" /> {tr('storage.newBucket')}
           </Button>
         </div>
       </header>
@@ -90,14 +92,14 @@ function StorageBucketsInner() {
             <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
           </Card>
         ) : loading ? (
-          <p className="text-sm text-muted-foreground">Loading buckets…</p>
+          <p className="text-sm text-muted-foreground">{tr('storage.loading')}</p>
         ) : buckets.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
               <HardDrive className="h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No buckets yet.</p>
+              <p className="text-sm text-muted-foreground">{tr('storage.empty')}</p>
               <Button size="sm" onClick={() => setCreating(true)}>
-                Create your first bucket
+                {tr('storage.createFirst')}
               </Button>
             </CardContent>
           </Card>
@@ -114,11 +116,11 @@ function StorageBucketsInner() {
                       </div>
                       {b.public ? (
                         <Badge variant="success">
-                          <Globe className="mr-1 h-3 w-3" /> public
+                          <Globe className="mr-1 h-3 w-3" /> {tr('storage.public')}
                         </Badge>
                       ) : (
                         <Badge variant="outline">
-                          <Lock className="mr-1 h-3 w-3" /> private
+                          <Lock className="mr-1 h-3 w-3" /> {tr('storage.private')}
                         </Badge>
                       )}
                     </div>
@@ -126,7 +128,7 @@ function StorageBucketsInner() {
                       <p>
                         ID <code className="font-mono">{b.id}</code>
                       </p>
-                      {b.file_size_limit ? <p>Max file: {formatBytes(b.file_size_limit)}</p> : null}
+                      {b.file_size_limit ? <p>{tr('storage.maxFile', { size: formatBytes(b.file_size_limit) })}</p> : null}
                       {b.allowed_mime_types && b.allowed_mime_types.length > 0 ? (
                         <p>
                           MIME: {b.allowed_mime_types.slice(0, 2).join(', ')}
@@ -135,7 +137,7 @@ function StorageBucketsInner() {
                       ) : null}
                     </div>
                     <div className="flex items-center justify-end pt-1 text-xs text-muted-foreground">
-                      Browse <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                      {tr('storage.browse')} <ArrowRight className="ml-1 h-3.5 w-3.5" />
                     </div>
                   </CardContent>
                 </Card>
@@ -166,6 +168,7 @@ interface CreateBucketProps {
 }
 
 function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketProps) {
+  const { tr } = useI18n();
   const [name, setName] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [fileSizeLimit, setFileSizeLimit] = useState('');
@@ -187,7 +190,7 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
     e.preventDefault();
     const bucketName = normalizeBucketName(name);
     if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucketName)) {
-      setError('Bucket name must be 3-63 characters and use lowercase letters, digits, and hyphens.');
+      setError(tr('storage.createNameHelp'));
       return;
     }
     setSubmitting(true);
@@ -211,7 +214,7 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
       await apiFetch('/storage/v1/bucket', { method: 'POST', body, apikey });
       onCreated();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Create failed.');
+      setError((err as ApiError).message ?? tr('storage.cancel'));
     } finally {
       setSubmitting(false);
     }
@@ -219,11 +222,11 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogHeader title="New bucket" onClose={onClose} />
+      <DialogHeader title={tr('storage.createTitle')} onClose={onClose} />
       <form onSubmit={submit}>
         <DialogBody className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="bucket-name">Name</Label>
+            <Label htmlFor="bucket-name">{tr('storage.createName')}</Label>
             <Input
               id="bucket-name"
               required
@@ -237,15 +240,15 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
               autoFocus
             />
             <p className="text-[10px] text-muted-foreground">
-              3-63 characters. Lowercase letters, digits, and hyphens; must start and end with a letter or digit.
+              {tr('storage.createNameHelp')}
             </p>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-            <span>Public bucket (anyone can read objects)</span>
+            <span>{tr('storage.createPublic')}</span>
           </label>
           <div className="space-y-1.5">
-            <Label htmlFor="bucket-size">File size limit (bytes, optional)</Label>
+            <Label htmlFor="bucket-size">{tr('storage.createSizeLimit')}</Label>
             <Input
               id="bucket-size"
               type="number"
@@ -256,7 +259,7 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bucket-mime">Allowed MIME types (comma-separated, optional)</Label>
+            <Label htmlFor="bucket-mime">{tr('storage.createMime')}</Label>
             <Input
               id="bucket-mime"
               value={allowedMime}
@@ -268,10 +271,10 @@ function CreateBucketDialog({ open, apikey, onClose, onCreated }: CreateBucketPr
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('storage.cancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create bucket'}
+            {submitting ? tr('storage.creating') : tr('storage.createBucket')}
           </Button>
         </DialogFooter>
       </form>

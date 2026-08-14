@@ -1,6 +1,7 @@
 'use client';
 
 import { Card, CardContent } from '@nubase/ui';
+import { useI18n } from '@/lib/i18n';
 
 /** Shared presentational form helpers for the Authentication admin pages. */
 
@@ -59,6 +60,7 @@ export function BoolInput({
   onChange: (v: boolean) => void;
   disabled?: boolean;
 }) {
+  const { tr } = useI18n();
   return (
     <label className={'inline-flex select-none items-center gap-2 ' + (disabled ? 'opacity-50' : 'cursor-pointer')}>
       <input
@@ -69,7 +71,7 @@ export function BoolInput({
         className="h-4 w-4 cursor-pointer rounded border-input accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed"
       />
       <span className={'text-xs ' + (value ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-        {value ? 'on' : 'off'}
+        {value ? tr('authBits.on') : tr('authBits.off')}
       </span>
     </label>
   );

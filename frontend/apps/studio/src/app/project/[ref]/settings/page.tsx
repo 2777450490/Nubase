@@ -18,6 +18,7 @@ import { useSession } from '@/lib/session';
 import { apiFetch, fetchAllProjects, API_BASE, type ApiError } from '@/lib/api';
 import { MembersCard } from '@/components/members-card';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface ProjectKeysResponse {
   service_role_token?: string | null;
@@ -35,6 +36,7 @@ interface ProjectSummaryPatch {
 }
 
 export default function SettingsPage({ params }: { params: { ref: string } }) {
+  const { tr } = useI18n();
   const router = useRouter();
   const { project, platformKey, setProject } = useSession();
   const projectRef = useProjectRef(params.ref);
@@ -128,7 +130,7 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
       setMetaSaved(true);
       setTimeout(() => setMetaSaved(false), 1500);
     } catch (err) {
-      setMetaError(parseError(err as ApiError) ?? 'Update failed.');
+      setMetaError(parseError(err as ApiError) ?? tr('settings.saveChanges'));
     } finally {
       setSavingMeta(false);
     }
@@ -146,7 +148,7 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
       });
       setPaused((p) => !p);
     } catch (err) {
-      setActionError(parseError(err as ApiError) ?? 'Action failed.');
+      setActionError(parseError(err as ApiError) ?? tr('settings.cancel'));
     } finally {
       setBusy(null);
     }
@@ -165,7 +167,7 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
       if (project?.ref === projectRef) setProject(null);
       router.replace('/projects');
     } catch (err) {
-      setActionError(parseError(err as ApiError) ?? 'Delete failed.');
+      setActionError(parseError(err as ApiError) ?? tr('settings.delete'));
       setBusy(null);
     }
   }
@@ -176,43 +178,43 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
   return (
     <div className="space-y-6 overflow-auto p-8">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">Project configuration and connection details.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{tr('settings.title')}</h1>
+        <p className="text-sm text-muted-foreground">{tr('settings.subtitle')}</p>
       </header>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">General</CardTitle>
-          <CardDescription>Display name and description.</CardDescription>
+          <CardTitle className="text-base">{tr('settings.general')}</CardTitle>
+          <CardDescription>{tr('settings.generalDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={saveMeta} className="space-y-3 text-sm">
-            <Row label="Reference">
+            <Row label={tr('settings.reference')}>
               <code className="font-mono text-xs">{projectRef}</code>
-              <p className="mt-1 text-xs text-muted-foreground">Immutable. Used as URL and JWT ref.</p>
+              <p className="mt-1 text-xs text-muted-foreground">{tr('settings.referenceHelp')}</p>
             </Row>
             <div className="grid grid-cols-[140px_1fr] items-start gap-4">
               <Label htmlFor="proj-name" className="pt-2 text-xs text-muted-foreground">
-                Display name
+                {tr('settings.displayName')}
               </Label>
               <Input id="proj-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="grid grid-cols-[140px_1fr] items-start gap-4">
               <Label htmlFor="proj-desc" className="pt-2 text-xs text-muted-foreground">
-                Description
+                {tr('settings.description')}
               </Label>
               <Input
                 id="proj-desc"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional"
+                placeholder={tr('settings.optional')}
               />
             </div>
             {metaError ? <p className="text-xs text-destructive">{metaError}</p> : null}
             <div className="flex items-center justify-end gap-2">
-              {metaSaved ? <Badge variant="success">saved</Badge> : null}
+              {metaSaved ? <Badge variant="success">{tr('settings.saved')}</Badge> : null}
               <Button type="submit" size="sm" disabled={savingMeta}>
-                {savingMeta ? 'Saving…' : 'Save changes'}
+                {savingMeta ? tr('settings.saving') : tr('settings.saveChanges')}
               </Button>
             </div>
           </form>
@@ -221,27 +223,22 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">API</CardTitle>
-          <CardDescription>Endpoint and keys for connecting clients.</CardDescription>
+          <CardTitle className="text-base">{tr('settings.api')}</CardTitle>
+          <CardDescription>{tr('settings.apiDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
-          <Row label="URL">
+          <Row label={tr('settings.url')}>
             <div className="flex items-center gap-2">
               <code className="font-mono text-xs">{API_BASE}</code>
-              <Button size="icon" variant="ghost" onClick={() => copy('url', API_BASE)} aria-label="Copy URL">
+              <Button size="icon" variant="ghost" onClick={() => copy('url', API_BASE)} aria-label={tr('settings.copyUrl')}>
                 <Copy className="h-3.5 w-3.5" />
               </Button>
-              {copied === 'url' ? <Badge variant="success">copied</Badge> : null}
+              {copied === 'url' ? <Badge variant="success">{tr('settings.copied')}</Badge> : null}
             </div>
           </Row>
           <KeyRow
-            label="service_role"
-            description={
-              <>
-                Full bypass of RLS. Use only from a trusted server, <strong>never</strong> in a browser
-                bundle.
-              </>
-            }
+            label={tr('settings.serviceRole')}
+            description={tr('settings.serviceRoleDesc')}
             value={serviceKey}
             show={showService}
             onToggle={() => setShowService((v) => !v)}
@@ -249,13 +246,8 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
             copied={copied === 'service'}
           />
           <KeyRow
-            label="authenticated"
-            description={
-              <>
-                Acts as the <code>authenticated</code> Postgres role. Safe to embed in a client app —
-                RLS still applies.
-              </>
-            }
+            label={tr('settings.authenticated')}
+            description={tr('settings.authenticatedDesc')}
             value={authKey}
             show={showAuth}
             onToggle={() => setShowAuth((v) => !v)}
@@ -269,52 +261,51 @@ export default function SettingsPage({ params }: { params: { ref: string } }) {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base text-destructive">Danger zone</CardTitle>
-          <CardDescription>Destructive actions — they cannot be undone.</CardDescription>
+          <CardTitle className="text-base text-destructive">{tr('settings.dangerZone')}</CardTitle>
+          <CardDescription>{tr('settings.dangerDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {actionError ? <p className="text-xs text-destructive">{actionError}</p> : null}
           <div className="flex items-center justify-between gap-4 rounded-md border border-destructive/30 p-3">
             <div>
-              <p className="text-sm font-medium">{paused ? 'Resume project' : 'Pause project'}</p>
+              <p className="text-sm font-medium">{paused ? tr('settings.resume') : tr('settings.pause')}</p>
               <p className="text-xs text-muted-foreground">
                 {paused
-                  ? 'Re-enable the project so it appears in the list and accepts traffic.'
-                  : 'Disables the project — it drops out of the projects list and stops accepting traffic. The database stays intact.'}
+                  ? tr('settings.resumeDesc')
+                  : tr('settings.pauseDesc')}
               </p>
             </div>
             <Button size="sm" variant="outline" onClick={togglePause} disabled={busy === 'pause'}>
               {paused ? (
                 <>
-                  <Play className="h-3.5 w-3.5" /> Resume
+                  <Play className="h-3.5 w-3.5" /> {tr('settings.resumeBtn')}
                 </>
               ) : (
                 <>
-                  <Pause className="h-3.5 w-3.5" /> Pause
+                  <Pause className="h-3.5 w-3.5" /> {tr('settings.pauseBtn')}
                 </>
               )}
             </Button>
           </div>
           <div className="flex items-center justify-between gap-4 rounded-md border border-destructive/30 p-3">
             <div>
-              <p className="text-sm font-medium">Delete project</p>
+              <p className="text-sm font-medium">{tr('settings.deleteProject')}</p>
               <p className="text-xs text-muted-foreground">
-                Soft-delete: the project disappears from the dashboard but the underlying Postgres
-                database is preserved. Drop it manually if you want the data gone.
+                {tr('settings.deleteDesc')}
               </p>
             </div>
             {confirmDelete ? (
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="outline" onClick={() => setConfirmDelete(false)} disabled={busy === 'delete'}>
-                  Cancel
+                  {tr('settings.cancel')}
                 </Button>
                 <Button size="sm" variant="destructive" onClick={doDelete} disabled={busy === 'delete'}>
-                  {busy === 'delete' ? 'Deleting…' : 'Confirm delete'}
+                  {busy === 'delete' ? tr('settings.deleting') : tr('settings.confirmDelete')}
                 </Button>
               </div>
             ) : (
               <Button size="sm" variant="destructive" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="h-3.5 w-3.5" /> Delete
+                <Trash2 className="h-3.5 w-3.5" /> {tr('settings.delete')}
               </Button>
             )}
           </div>
@@ -351,6 +342,7 @@ function KeyRow({
   onCopy: () => void;
   copied: boolean;
 }) {
+  const { tr } = useI18n();
   const masked = value ? `${value.slice(0, 14)}…${value.slice(-8)}` : '—';
   return (
     <div className="grid grid-cols-[140px_1fr] items-start gap-4">
@@ -358,13 +350,13 @@ function KeyRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <code className="break-all font-mono text-xs">{show ? value || '—' : masked}</code>
-          <Button size="icon" variant="ghost" onClick={onToggle} aria-label="Toggle visibility">
+          <Button size="icon" variant="ghost" onClick={onToggle} aria-label={tr('settings.toggleVisibility')}>
             {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </Button>
           <Button size="icon" variant="ghost" onClick={onCopy} aria-label="Copy" disabled={!value}>
             <Copy className="h-3.5 w-3.5" />
           </Button>
-          {copied ? <Badge variant="success">copied</Badge> : null}
+          {copied ? <Badge variant="success">{tr('settings.copied')}</Badge> : null}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </div>

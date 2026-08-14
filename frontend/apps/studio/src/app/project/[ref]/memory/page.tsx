@@ -34,6 +34,7 @@ import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { MemorySubNav } from './_components/sub-nav';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 import type {
   MemoryItem,
   PagedResponse,
@@ -55,6 +56,7 @@ export default function MemoryListPage({ params }: { params: { ref: string } }) 
 }
 
 function MemoryListInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
   const { project } = useSession();
   const apikey = project!.apikey;
 
@@ -129,7 +131,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
         setTotal(res.total ?? 0);
       }
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load memories.');
+      setError((err as ApiError).message ?? tr('memory.loadFailed'));
       setItems([]);
       setTotal(0);
     } finally {
@@ -197,7 +199,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
       await loadList();
       await loadStats();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Bulk delete failed.');
+      setError((err as ApiError).message ?? tr('memory.bulkDeleteFailed'));
     } finally {
       setLoading(false);
     }
@@ -210,11 +212,11 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
       {/* ---------- left filter sidebar ---------- */}
       <aside className="w-64 shrink-0 border-r border-border bg-card/30">
         <div className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <Filter className="mr-1.5 inline h-3 w-3" /> Filters
+          <Filter className="mr-1.5 inline h-3 w-3" /> {tr('memory.filters')}
         </div>
         <div className="space-y-3 p-3">
           <div className="space-y-1">
-            <Label className="text-xs">User ID</Label>
+            <Label className="text-xs">{tr('memory.userId')}</Label>
             <Input
               value={filterUserId}
               onChange={(e) => setFilterUserId(e.target.value)}
@@ -223,29 +225,29 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Agent ID</Label>
+            <Label className="text-xs">{tr('memory.agentId')}</Label>
             <Input
               value={filterAgentId}
               onChange={(e) => setFilterAgentId(e.target.value)}
-              placeholder="agent name"
+              placeholder={tr('memory.agentPlaceholder')}
               className="h-8 text-xs"
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Run ID</Label>
+            <Label className="text-xs">{tr('memory.runId')}</Label>
             <Input
               value={filterRunId}
               onChange={(e) => setFilterRunId(e.target.value)}
-              placeholder="conversation id"
+              placeholder={tr('memory.conversationPlaceholder')}
               className="h-8 text-xs"
             />
           </div>
           <div className="flex gap-2 pt-2">
             <Button size="sm" onClick={applyFilters} className="flex-1">
-              Apply
+              {tr('memory.apply')}
             </Button>
             <Button size="sm" variant="outline" onClick={clearFilters}>
-              Clear
+              {tr('memory.clear')}
             </Button>
           </div>
         </div>
@@ -258,17 +260,17 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               icon={Brain}
-              label="Memories"
+              label={tr('memory.memories')}
               value={stats?.totalMemories ?? '—'}
             />
             <StatCard
               icon={Database}
-              label="Entities"
+              label={tr('memory.entities')}
               value={stats?.totalEntities ?? '—'}
             />
             <StatCard
               icon={Activity}
-              label="Activity (24h)"
+              label={tr('memory.activity24h')}
               value={
                 stats
                   ? `${stats.last24h.add}+ / ${stats.last24h.update}~ / ${stats.last24h.delete}-`
@@ -277,7 +279,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
             />
             <StatCard
               icon={UsersIcon}
-              label="Top users"
+              label={tr('memory.topUsers')}
               value={stats?.topUsers?.length ?? 0}
             />
           </div>
@@ -286,11 +288,11 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
         {/* Toolbar */}
         <header className="flex items-center justify-between border-b border-border px-4 py-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Memories</h2>
-            <Badge variant="outline">{inSearchMode ? `${total} matches` : `${total} total`}</Badge>
+            <h2 className="text-sm font-semibold">{tr('memory.memories')}</h2>
+            <Badge variant="outline">{inSearchMode ? tr('memory.matches', { total }) : tr('memory.total', { total })}</Badge>
             {inSearchMode && (
               <Badge variant="secondary" className="gap-1">
-                <Sparkles className="h-3 w-3" /> search
+                <Sparkles className="h-3 w-3" /> {tr('memory.search')}
               </Badge>
             )}
           </div>
@@ -303,7 +305,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') onSearch();
                 }}
-                placeholder="Semantic + keyword search"
+                placeholder={tr('memory.search')}
                 className="h-8 w-64 pl-7 pr-7 text-xs"
               />
               {searchInput && (
@@ -317,15 +319,15 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
               )}
             </div>
             <Button size="sm" variant="outline" onClick={() => { loadList(); loadStats(); }}>
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+              <RefreshCw className="h-3.5 w-3.5" /> {tr('memory.refresh')}
             </Button>
             {selected.size > 0 && (
               <Button size="sm" variant="destructive" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="h-3.5 w-3.5" /> Delete ({selected.size})
+                <Trash2 className="h-3.5 w-3.5" /> {tr('memory.delete', { n: selected.size })}
               </Button>
             )}
             <Button size="sm" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Add
+              <Plus className="h-3.5 w-3.5" /> {tr('memory.add')}
             </Button>
           </div>
         </header>
@@ -349,18 +351,18 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="px-3 py-2">Memory</th>
-                <th className="w-48 px-3 py-2">User</th>
-                <th className="w-32 px-3 py-2">Agent / Run</th>
-                <th className="w-32 px-3 py-2">Created</th>
-                {inSearchMode && <th className="w-20 px-3 py-2">Score</th>}
+                <th className="px-3 py-2">{tr('memory.colMemory')}</th>
+                <th className="w-48 px-3 py-2">{tr('memory.colUser')}</th>
+                <th className="w-32 px-3 py-2">{tr('memory.colAgentRun')}</th>
+                <th className="w-32 px-3 py-2">{tr('memory.colCreated')}</th>
+                {inSearchMode && <th className="w-20 px-3 py-2">{tr('memory.colScore')}</th>}
               </tr>
             </thead>
             <tbody>
               {loading && items.length === 0 ? (
-                <tr><td colSpan={inSearchMode ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={inSearchMode ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">{tr('memory.loading')}</td></tr>
               ) : items.length === 0 ? (
-                <tr><td colSpan={inSearchMode ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">No memories.</td></tr>
+                <tr><td colSpan={inSearchMode ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">{tr('memory.empty')}</td></tr>
               ) : (
                 items.map((m) => (
                   <tr key={m.id} className="border-b border-border/50 hover:bg-accent/30">
@@ -404,7 +406,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
         {!inSearchMode && (
           <footer className="flex items-center justify-between border-t border-border px-4 py-2 text-xs">
             <div className="flex items-center gap-2">
-              <Label className="text-xs">Page size</Label>
+              <Label className="text-xs">{tr('memory.pageSize')}</Label>
               <select
                 value={pageSize}
                 onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
@@ -415,7 +417,7 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">
-                {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)} of {total}
+                {tr('memory.of', { start: (page - 1) * pageSize + 1, end: Math.min(page * pageSize, total), total })}
               </span>
               <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -432,13 +434,13 @@ function MemoryListInner({ projectRef }: { projectRef: string }) {
 
       {/* Bulk delete confirm */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogHeader>Delete selected memories?</DialogHeader>
+        <DialogHeader>{tr('memory.deleteTitle')}</DialogHeader>
         <DialogBody>
-          <p className="text-sm">This will soft-delete {selected.size} memorie(s). Entity links will be cleaned up.</p>
+          <p className="text-sm">{tr('memory.deleteDesc', { n: selected.size })}</p>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={performBulkDelete}>Delete</Button>
+          <Button variant="outline" onClick={() => setConfirmDelete(false)}>{tr('memory.cancel')}</Button>
+          <Button variant="destructive" onClick={performBulkDelete}>{tr('memory.deleteConfirm')}</Button>
         </DialogFooter>
       </Dialog>
 
@@ -488,6 +490,7 @@ function CreateMemoryDialog({
   apikey: string;
   onDone: () => void;
 }) {
+  const { tr } = useI18n();
   const [content, setContent] = useState('');
   const [userId, setUserId] = useState('');
   const [agentId, setAgentId] = useState('');
@@ -503,7 +506,7 @@ function CreateMemoryDialog({
   const submit = async () => {
     if (!content.trim()) return;
     if (!userId.trim() && !agentId.trim() && !runId.trim()) {
-      setErr('At least one of userId / agentId / runId is required.');
+      setErr(tr('memory.addRequireKey'));
       return;
     }
     setSubmitting(true);
@@ -521,7 +524,7 @@ function CreateMemoryDialog({
       onOpenChange(false);
       onDone();
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Failed to add memory.');
+      setErr((e as ApiError).message ?? tr('memory.addFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -529,43 +532,43 @@ function CreateMemoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogHeader>Add memory</DialogHeader>
+      <DialogHeader>{tr('memory.addTitle')}</DialogHeader>
       <DialogBody>
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label className="text-xs">Content</Label>
+            <Label className="text-xs">{tr('memory.addContent')}</Label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="What should be remembered?"
+              placeholder={tr('memory.addContentPlaceholder')}
               className="min-h-[80px] w-full rounded-md border border-input bg-background p-2 text-sm"
             />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">User ID</Label>
+              <Label className="text-xs">{tr('memory.addUserId')}</Label>
               <Input value={userId} onChange={(e) => setUserId(e.target.value)} className="h-8 text-xs" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Agent ID</Label>
+              <Label className="text-xs">{tr('memory.addAgentId')}</Label>
               <Input value={agentId} onChange={(e) => setAgentId(e.target.value)} className="h-8 text-xs" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Run ID</Label>
+              <Label className="text-xs">{tr('memory.addRunId')}</Label>
               <Input value={runId} onChange={(e) => setRunId(e.target.value)} className="h-8 text-xs" />
             </div>
           </div>
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" checked={infer} onChange={(e) => setInfer(e.target.checked)} />
-            Use LLM to extract facts (infer=true). Disable to store verbatim.
+            {tr('memory.addInfer')}
           </label>
           {err && <p className="text-xs text-destructive">{err}</p>}
         </div>
       </DialogBody>
       <DialogFooter>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>{tr('memory.cancel')}</Button>
         <Button onClick={submit} disabled={submitting || !content.trim()}>
-          {submitting ? 'Adding…' : 'Add'}
+          {submitting ? tr('memory.adding') : tr('memory.addBtn')}
         </Button>
       </DialogFooter>
     </Dialog>

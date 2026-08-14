@@ -5,12 +5,12 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Nubase Studio',
-  description: 'Manage your nubase projects.',
+  description: '管理你的 nubase 项目。',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans antialiased">
         <Providers>{children}</Providers>
       </body>

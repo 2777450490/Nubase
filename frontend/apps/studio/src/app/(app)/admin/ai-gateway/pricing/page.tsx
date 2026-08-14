@@ -6,6 +6,7 @@ import { Badge, Button, Card, CardContent, Input, Label } from '@nubase/ui';
 import { CircleDollarSign, Plus, RefreshCw } from 'lucide-react';
 import { apiFetch, type ApiError } from '@/lib/api';
 import { isSuperAdmin, useSession } from '@/lib/session';
+import { useI18n } from '@/lib/i18n';
 
 interface PriceVersion {
   id: number;
@@ -55,6 +56,7 @@ const EMPTY_FORM: PriceForm = {
 };
 
 export default function CustomerBillingPricesPage() {
+  const { tr } = useI18n();
   const router = useRouter();
   const { platformKey, user, hasHydrated } = useSession();
   const superAdmin = isSuperAdmin(user);
@@ -79,7 +81,7 @@ export default function CustomerBillingPricesPage() {
       setPrices(priceRows);
       setModels(discoveredRows);
     } catch (err) {
-      setError(errorMessage(err, 'Failed to load customer billing prices.'));
+      setError(errorMessage(err, tr('adminPricing.loadFailed')));
     } finally {
       setLoading(false);
     }
@@ -129,17 +131,17 @@ export default function CustomerBillingPricesPage() {
           provider: form.provider.trim().toUpperCase(),
           displayName: form.displayName.trim() || null,
           currency: form.currency.trim().toUpperCase(),
-          inputPricePer1M: numericPrice(form.inputPricePer1M),
-          outputPricePer1M: numericPrice(form.outputPricePer1M),
-          cacheCreationPricePer1M: numericPrice(form.cacheCreationPricePer1M),
-          cacheReadPricePer1M: numericPrice(form.cacheReadPricePer1M),
+          inputPricePer1M: numericPrice(form.inputPricePer1M, tr('adminPricing.nonNegative')),
+          outputPricePer1M: numericPrice(form.outputPricePer1M, tr('adminPricing.nonNegative')),
+          cacheCreationPricePer1M: numericPrice(form.cacheCreationPricePer1M, tr('adminPricing.nonNegative')),
+          cacheReadPricePer1M: numericPrice(form.cacheReadPricePer1M, tr('adminPricing.nonNegative')),
         },
       });
       setForm(EMPTY_FORM);
-      setSavedMessage('Price published. Existing requests keep their original price snapshot.');
+      setSavedMessage(tr('adminPricing.published'));
       await load();
     } catch (err) {
-      setError(errorMessage(err, 'Failed to publish price.'));
+      setError(errorMessage(err, tr('adminPricing.publishFailed')));
     } finally {
       setPublishing(false);
     }
@@ -151,13 +153,13 @@ export default function CustomerBillingPricesPage() {
     <div className="mx-auto w-full max-w-7xl space-y-6 p-8">
       <header className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Customer billing prices</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{tr('adminPricing.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            Platform selling prices used for managed billing across all projects. Super admins only.
+            {tr('adminPricing.desc')}
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-          <RefreshCw className="h-3.5 w-3.5" /> {loading ? 'Refreshing…' : 'Refresh'}
+          <RefreshCw className="h-3.5 w-3.5" /> {loading ? tr('adminPricing.refreshing') : tr('adminPricing.refresh')}
         </Button>
       </header>
 
@@ -165,18 +167,18 @@ export default function CustomerBillingPricesPage() {
       {savedMessage ? <p className="text-sm text-emerald-500">{savedMessage}</p> : null}
 
       <div className="grid gap-4 md:grid-cols-3">
-        <SummaryCard label="Active prices" value={activeCount} />
-        <SummaryCard label="Price versions" value={prices.length} />
-        <SummaryCard label="Unpriced discovered models" value={unpricedModels.length} warning={unpricedModels.length > 0} />
+        <SummaryCard label={tr('adminPricing.cardActive')} value={activeCount} />
+        <SummaryCard label={tr('adminPricing.cardVersions')} value={prices.length} />
+        <SummaryCard label={tr('adminPricing.cardUnpriced')} value={unpricedModels.length} warning={unpricedModels.length > 0} />
       </div>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.55fr)]">
         <Card>
           <CardContent className="p-0">
             <div className="border-b border-border px-5 py-4">
-              <h2 className="font-semibold">Published price versions</h2>
+              <h2 className="font-semibold">{tr('adminPricing.tableTitle')}</h2>
               <p className="text-xs text-muted-foreground">
-                Publishing a replacement closes the current version. In-flight requests retain their price snapshot.
+                {tr('adminPricing.tableDesc')}
               </p>
             </div>
             <PriceTable prices={prices} loading={loading} />
@@ -188,15 +190,15 @@ export default function CustomerBillingPricesPage() {
             <div className="flex items-center gap-2">
               <CircleDollarSign className="h-4 w-4 text-muted-foreground" />
               <div>
-                <h2 className="font-semibold">Publish a price</h2>
-                <p className="text-xs text-muted-foreground">All amounts are per one million tokens.</p>
+                <h2 className="font-semibold">{tr('adminPricing.publishTitle')}</h2>
+                <p className="text-xs text-muted-foreground">{tr('adminPricing.amountsPerMillion')}</p>
               </div>
             </div>
 
             {unpricedModels.length > 0 ? (
               <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
                 <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                  Models discovered from active platform upstreams without an active price
+                  {tr('adminPricing.unpricedDesc')}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {unpricedModels.map((model) => (
@@ -205,7 +207,7 @@ export default function CustomerBillingPricesPage() {
                       type="button"
                       className="rounded border border-border bg-card px-2 py-1 font-mono text-[11px] hover:bg-accent"
                       onClick={() => selectModel(model)}
-                      title={`Use ${model.model}`}
+                      title={tr('adminPricing.useModel', { model: model.model })}
                     >
                       {model.model}
                     </button>
@@ -215,7 +217,7 @@ export default function CustomerBillingPricesPage() {
             ) : null}
 
             <form className="space-y-4" onSubmit={publish}>
-              <Field label="Model" htmlFor="billing-price-model">
+              <Field label={tr('adminPricing.fieldModel')} htmlFor="billing-price-model">
                 <Input
                   id="billing-price-model"
                   required
@@ -231,7 +233,7 @@ export default function CustomerBillingPricesPage() {
               </Field>
 
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Provider" htmlFor="billing-price-provider">
+                <Field label={tr('adminPricing.fieldProvider')} htmlFor="billing-price-provider">
                   <select
                     id="billing-price-provider"
                     required
@@ -243,7 +245,7 @@ export default function CustomerBillingPricesPage() {
                     <option value="CLAUDE">CLAUDE</option>
                   </select>
                 </Field>
-                <Field label="Currency" htmlFor="billing-price-currency">
+                <Field label={tr('adminPricing.fieldCurrency')} htmlFor="billing-price-currency">
                   <Input
                     id="billing-price-currency"
                     required
@@ -256,7 +258,7 @@ export default function CustomerBillingPricesPage() {
                 </Field>
               </div>
 
-              <Field label="Display name" htmlFor="billing-price-display-name" hint="Optional label shown to operators.">
+              <Field label={tr('adminPricing.fieldDisplayName')} htmlFor="billing-price-display-name" hint={tr('adminPricing.displayNameHint')}>
                 <Input
                   id="billing-price-display-name"
                   maxLength={160}
@@ -266,14 +268,14 @@ export default function CustomerBillingPricesPage() {
               </Field>
 
               <div className="grid grid-cols-2 gap-3">
-                <PriceInput label="Input" value={form.inputPricePer1M} onChange={(value) => setForm({ ...form, inputPricePer1M: value })} required />
-                <PriceInput label="Output" value={form.outputPricePer1M} onChange={(value) => setForm({ ...form, outputPricePer1M: value })} required />
-                <PriceInput label="Cache creation" value={form.cacheCreationPricePer1M} onChange={(value) => setForm({ ...form, cacheCreationPricePer1M: value })} />
-                <PriceInput label="Cache read" value={form.cacheReadPricePer1M} onChange={(value) => setForm({ ...form, cacheReadPricePer1M: value })} />
+                <PriceInput label={tr('adminPricing.priceInput')} value={form.inputPricePer1M} onChange={(value) => setForm({ ...form, inputPricePer1M: value })} required />
+                <PriceInput label={tr('adminPricing.priceOutput')} value={form.outputPricePer1M} onChange={(value) => setForm({ ...form, outputPricePer1M: value })} required />
+                <PriceInput label={tr('adminPricing.priceCacheCreation')} value={form.cacheCreationPricePer1M} onChange={(value) => setForm({ ...form, cacheCreationPricePer1M: value })} />
+                <PriceInput label={tr('adminPricing.priceCacheRead')} value={form.cacheReadPricePer1M} onChange={(value) => setForm({ ...form, cacheReadPricePer1M: value })} />
               </div>
 
               <Button className="w-full" type="submit" variant="brand" disabled={publishing}>
-                <Plus className="h-3.5 w-3.5" /> {publishing ? 'Publishing…' : 'Publish price version'}
+                <Plus className="h-3.5 w-3.5" /> {publishing ? tr('adminPricing.publishing') : tr('adminPricing.publish')}
               </Button>
             </form>
           </CardContent>
@@ -295,18 +297,19 @@ function SummaryCard({ label, value, warning = false }: { label: string; value: 
 }
 
 function PriceTable({ prices, loading }: { prices: PriceVersion[]; loading: boolean }) {
+  const { tr } = useI18n();
   if (loading && prices.length === 0) {
-    return <p className="p-5 text-sm text-muted-foreground">Loading…</p>;
+    return <p className="p-5 text-sm text-muted-foreground">{tr('adminPricing.loading')}</p>;
   }
   if (prices.length === 0) {
-    return <p className="p-5 text-sm text-muted-foreground">No customer billing prices published.</p>;
+    return <p className="p-5 text-sm text-muted-foreground">{tr('adminPricing.empty')}</p>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[850px] text-sm">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
-            {['Model', 'Provider', 'Input / 1M', 'Output / 1M', 'Cache create / read', 'Effective period', 'Status'].map((header) => (
+            {[tr('adminPricing.colModel'), tr('adminPricing.colProvider'), tr('adminPricing.colInput'), tr('adminPricing.colOutput'), tr('adminPricing.colCache'), tr('adminPricing.colPeriod'), tr('adminPricing.colStatus')].map((header) => (
               <th key={header} className="px-4 py-2 text-left font-medium">{header}</th>
             ))}
           </tr>
@@ -326,10 +329,10 @@ function PriceTable({ prices, loading }: { prices: PriceVersion[]; loading: bool
               </td>
               <td className="px-4 py-3 text-xs text-muted-foreground">
                 <div>{formatDate(price.effectiveFrom)}</div>
-                <div>{price.effectiveTo ? `to ${formatDate(price.effectiveTo)}` : 'current'}</div>
+                <div>{price.effectiveTo ? tr('adminPricing.to', { date: formatDate(price.effectiveTo) }) : tr('adminPricing.current')}</div>
               </td>
               <td className="px-4 py-3">
-                <Badge variant={price.active ? 'success' : 'outline'}>{price.active ? 'active' : 'historical'}</Badge>
+                <Badge variant={price.active ? 'success' : 'outline'}>{price.active ? tr('adminPricing.statusActive') : tr('adminPricing.statusHistorical')}</Badge>
               </td>
             </tr>
           ))}
@@ -366,10 +369,10 @@ function PriceInput({ label, value, onChange, required = false }: { label: strin
   );
 }
 
-function numericPrice(value: string): number {
+function numericPrice(value: string, message: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error('Prices must be non-negative numbers.');
+    throw new Error(message);
   }
   return parsed;
 }

@@ -19,6 +19,7 @@ import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { AuthSubNav } from '../_components/sub-nav';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 import type { SsoProviderResponse, CreateSsoProviderRequest } from '@/lib/auth-types';
 
 export default function AuthSsoPage({ params }: { params: { ref: string } }) {
@@ -40,6 +41,8 @@ const EMPTY_FORM = {
 };
 
 function SsoInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
 
@@ -62,7 +65,7 @@ function SsoInner({ projectRef }: { projectRef: string }) {
       const list = await apiFetch<SsoProviderResponse[]>('/auth/v1/admin/sso/providers', { apikey });
       setProviders(list ?? []);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load SSO providers.');
+      setError((err as ApiError).message ?? trLoose('authSso.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -91,12 +94,12 @@ function SsoInner({ projectRef }: { projectRef: string }) {
         resourceId: form.resourceId.trim() || undefined,
       };
       await apiFetch('/auth/v1/admin/sso/providers', { method: 'POST', body, apikey });
-      setResult({ ok: true, message: 'SAML provider created.' });
+      setResult({ ok: true, message: trLoose('authSso.created') });
       setAddOpen(false);
       setForm({ ...EMPTY_FORM });
       await load();
     } catch (err) {
-      setResult({ ok: false, message: (err as ApiError).message ?? 'Create failed.' });
+      setResult({ ok: false, message: (err as ApiError).message ?? trLoose('authSso.createFailed') });
     } finally {
       setSubmitting(false);
     }
@@ -108,11 +111,11 @@ function SsoInner({ projectRef }: { projectRef: string }) {
     setResult(null);
     try {
       await apiFetch(`/auth/v1/admin/sso/providers/${deleteTarget.id}`, { method: 'DELETE', apikey });
-      setResult({ ok: true, message: 'SAML provider deleted.' });
+      setResult({ ok: true, message: trLoose('authSso.deleted') });
       setDeleteTarget(null);
       await load();
     } catch (err) {
-      setResult({ ok: false, message: (err as ApiError).message ?? 'Delete failed.' });
+      setResult({ ok: false, message: (err as ApiError).message ?? trLoose('authSso.deleteFailed') });
     } finally {
       setDeleting(false);
     }
@@ -126,18 +129,19 @@ function SsoInner({ projectRef }: { projectRef: string }) {
         <div className="max-w-4xl space-y-6 p-6">
           <header className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-lg font-semibold">SAML Single Sign-On</h1>
+              <h1 className="text-lg font-semibold">{tr('authSso.title')}</h1>
               <p className="text-xs text-muted-foreground">
-                Enterprise SSO for the <code className="mx-1 rounded bg-muted/40 px-1">{projectRef}</code> tenant.
-                Users whose email domain matches a registered provider are sent to that IdP.
+                {tr('authSso.descPrefix')}{' '}
+                <code className="mx-1 rounded bg-muted/40 px-1">{projectRef}</code>{' '}
+                {tr('authSso.descSuffix')}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button size="sm" variant="brand" onClick={() => { setResult(null); setForm({ ...EMPTY_FORM }); setAddOpen(true); }}>
-                <Plus className="h-3.5 w-3.5" /> Add provider
+                <Plus className="h-3.5 w-3.5" /> {tr('authSso.addProvider')}
               </Button>
               <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> Refresh
+                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> {tr('authCommon.refresh')}
               </Button>
             </div>
           </header>
@@ -147,10 +151,10 @@ function SsoInner({ projectRef }: { projectRef: string }) {
             <CardContent className="flex items-start gap-2 p-3 text-xs text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div>
-                Configure your IdP with the SP endpoints served at this project&apos;s API domain:
+                {tr('authSso.spHint')}
                 <div className="mt-1 font-mono">
-                  metadata: <code className="rounded bg-muted/40 px-1">/auth/v1/sso/saml/metadata</code>
-                  &nbsp;·&nbsp; ACS: <code className="rounded bg-muted/40 px-1">/auth/v1/sso/saml/acs</code>
+                  {tr('authSso.spHintMetadata')} <code className="rounded bg-muted/40 px-1">/auth/v1/sso/saml/metadata</code>
+                  &nbsp;·&nbsp; {tr('authSso.spHintAcs')}: <code className="rounded bg-muted/40 px-1">/auth/v1/sso/saml/acs</code>
                 </div>
               </div>
             </CardContent>
@@ -168,13 +172,13 @@ function SsoInner({ projectRef }: { projectRef: string }) {
           )}
 
           {loading && providers.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">{tr('authCommon.loading')}</p>
           ) : providers.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center gap-2 p-10 text-center">
                 <Building2 className="h-6 w-6 text-muted-foreground" />
-                <p className="text-sm font-medium">No SAML providers yet</p>
-                <p className="text-xs text-muted-foreground">Add an IdP to enable enterprise SSO for this project.</p>
+                <p className="text-sm font-medium">{tr('authSso.emptyTitle')}</p>
+                <p className="text-xs text-muted-foreground">{tr('authSso.emptyDesc')}</p>
               </CardContent>
             </Card>
           ) : (
@@ -183,10 +187,10 @@ function SsoInner({ projectRef }: { projectRef: string }) {
                 <table className="w-full text-xs">
                   <thead className="border-b border-border text-muted-foreground">
                     <tr>
-                      <th className="px-4 py-2 text-left font-medium">Entity ID</th>
-                      <th className="px-4 py-2 text-left font-medium">Domains</th>
-                      <th className="px-4 py-2 text-left font-medium">SSO URL</th>
-                      <th className="px-4 py-2 text-left font-medium">Status</th>
+                      <th className="px-4 py-2 text-left font-medium">{tr('authSso.colEntityId')}</th>
+                      <th className="px-4 py-2 text-left font-medium">{tr('authSso.colDomains')}</th>
+                      <th className="px-4 py-2 text-left font-medium">{tr('authSso.colSsoUrl')}</th>
+                      <th className="px-4 py-2 text-left font-medium">{tr('authSso.colStatus')}</th>
                       <th className="px-4 py-2" />
                     </tr>
                   </thead>
@@ -210,9 +214,9 @@ function SsoInner({ projectRef }: { projectRef: string }) {
                         </td>
                         <td className="px-4 py-2">
                           {p.enabled ? (
-                            <Badge variant="default">enabled</Badge>
+                            <Badge variant="default">{tr('authSso.enabled')}</Badge>
                           ) : (
-                            <Badge variant="outline" className="text-muted-foreground">disabled</Badge>
+                            <Badge variant="outline" className="text-muted-foreground">{tr('authSso.disabled')}</Badge>
                           )}
                         </td>
                         <td className="px-4 py-2 text-right">
@@ -232,16 +236,16 @@ function SsoInner({ projectRef }: { projectRef: string }) {
 
       {/* Add provider dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogHeader>Add SAML provider</DialogHeader>
+        <DialogHeader>{tr('authSso.addTitle')}</DialogHeader>
         <DialogBody>
           <div className="space-y-3">
-            <FormField label="IdP Entity ID *" hint="The IdP's entityID (issuer).">
+            <FormField label={tr('authSso.fEntityId')} hint={tr('authSso.fEntityIdHint')}>
               <Input value={form.entityId} onChange={(e) => setForm({ ...form, entityId: e.target.value })} placeholder="https://idp.example.com/saml/metadata" className="h-8 text-xs" />
             </FormField>
-            <FormField label="IdP SSO URL *" hint="The IdP's SSO (HTTP-Redirect) endpoint.">
+            <FormField label={tr('authSso.fSsoUrl')} hint={tr('authSso.fSsoUrlHint')}>
               <Input value={form.ssoUrl} onChange={(e) => setForm({ ...form, ssoUrl: e.target.value })} placeholder="https://idp.example.com/sso" className="h-8 text-xs" />
             </FormField>
-            <FormField label="Email domains" hint="One per line. Users with these email domains are routed to this IdP.">
+            <FormField label={tr('authSso.fDomains')} hint={tr('authSso.fDomainsHint')}>
               <textarea
                 value={form.domains}
                 onChange={(e) => setForm({ ...form, domains: e.target.value })}
@@ -250,7 +254,7 @@ function SsoInner({ projectRef }: { projectRef: string }) {
                 className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 font-mono text-xs shadow-sm transition-colors hover:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </FormField>
-            <FormField label="IdP X.509 certificate *" hint="PEM or base64 DER. Used to verify the SAML assertion signature.">
+            <FormField label={tr('authSso.fCert')} hint={tr('authSso.fCertHint')}>
               <textarea
                 value={form.x509Certificate}
                 onChange={(e) => setForm({ ...form, x509Certificate: e.target.value })}
@@ -259,32 +263,32 @@ function SsoInner({ projectRef }: { projectRef: string }) {
                 className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 font-mono text-xs shadow-sm transition-colors hover:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </FormField>
-            <FormField label="Resource ID (optional)" hint="Your own external identifier for this provider.">
+            <FormField label={tr('authSso.fResource')} hint={tr('authSso.fResourceHint')}>
               <Input value={form.resourceId} onChange={(e) => setForm({ ...form, resourceId: e.target.value })} placeholder="okta-prod" className="h-8 text-xs" />
             </FormField>
           </div>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setAddOpen(false)} disabled={submitting}>Cancel</Button>
+          <Button variant="outline" onClick={() => setAddOpen(false)} disabled={submitting}>{tr('authCommon.cancel')}</Button>
           <Button variant="brand" onClick={create} disabled={!canSubmit || submitting}>
-            {submitting ? 'Creating…' : 'Create'}
+            {submitting ? trLoose('authSso.creating') : trLoose('authSso.create')}
           </Button>
         </DialogFooter>
       </Dialog>
 
       {/* Delete confirmation */}
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <DialogHeader>Delete SAML provider?</DialogHeader>
+        <DialogHeader>{tr('authSso.deleteTitle')}</DialogHeader>
         <DialogBody>
           <p className="text-sm">
-            Remove the SAML provider <code className="rounded bg-muted/40 px-1">{deleteTarget?.entityId}</code> and
-            its domain mappings? Users on those domains will no longer be able to sign in via this IdP.
+            {tr('authSso.deleteBodyPrefix')} <code className="rounded bg-muted/40 px-1">{deleteTarget?.entityId}</code>
+            {tr('authSso.deleteBodySuffix')}
           </p>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>{tr('authCommon.cancel')}</Button>
           <Button variant="destructive" onClick={performDelete} disabled={deleting}>
-            {deleting ? 'Deleting…' : 'Delete'}
+            {deleting ? trLoose('authSso.deleting') : trLoose('authSso.delete')}
           </Button>
         </DialogFooter>
       </Dialog>

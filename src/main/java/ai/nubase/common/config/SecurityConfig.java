@@ -83,6 +83,8 @@ public class SecurityConfig {
                         //   3. MemoryService.resolveScope enforces owner = JWT sub (non-service_role)
                         //   4. /mem/v1/reset additionally goes through the @RequireServiceRole AOP
                         .requestMatchers("/mem/v1/**").permitAll()
+                        // Agent enablement endpoints (tenant resolved by UnifiedMultiTenancyFilter from apikey)
+                        .requestMatchers("/agent/v1/**").permitAll()
                         // Protected endpoints
                         .requestMatchers(
                                 "/auth/v1/user",

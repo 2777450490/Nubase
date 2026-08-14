@@ -49,9 +49,9 @@ export default function AccountPage() {
             <span className="text-xs text-muted-foreground">{tr('account.role')}</span>
             <div>
               {user.role === 'super_admin' ? (
-                <Badge variant="success">super admin</Badge>
+                <Badge variant="success">{tr('account.roleBadgeSuper')}</Badge>
               ) : (
-                <Badge variant="outline">user</Badge>
+                <Badge variant="outline">{tr('account.roleBadgeUser')}</Badge>
               )}
               <p className="mt-1 text-xs text-muted-foreground">
                 {user.role === 'super_admin'

@@ -25,6 +25,7 @@ import { apiFetch, API_BASE, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface TableRef {
   schema: string;
@@ -53,7 +54,7 @@ interface FilterRule {
   value: string;
 }
 
-const OPERATORS: Array<{ value: string; label: string; takesValue: boolean }> = [
+const OPERATORS: Array<{ value: string; label: string; labelKey?: string; takesValue: boolean }> = [
   { value: 'eq', label: '=', takesValue: true },
   { value: 'neq', label: '≠', takesValue: true },
   { value: 'gt', label: '>', takesValue: true },
@@ -62,8 +63,8 @@ const OPERATORS: Array<{ value: string; label: string; takesValue: boolean }> = 
   { value: 'lte', label: '≤', takesValue: true },
   { value: 'like', label: 'like', takesValue: true },
   { value: 'ilike', label: 'ilike', takesValue: true },
-  { value: 'in', label: 'in (csv)', takesValue: true },
-  { value: 'is', label: 'is (null/true/false)', takesValue: true },
+  { value: 'in', label: 'in (csv)', labelKey: 'editor.opIn', takesValue: true },
+  { value: 'is', label: 'is (null/true/false)', labelKey: 'editor.opIs', takesValue: true },
 ];
 
 const PAGE_SIZE = 50;
@@ -108,6 +109,8 @@ export default function TableEditorPage({ params }: { params: { ref: string } })
 }
 
 function TableEditorInner() {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project } = useSession();
   const apikey = project!.apikey;
   const [tables, setTables] = useState<TableRef[]>([]);
@@ -140,7 +143,7 @@ function TableEditorInner() {
         body: { query },
         apikey,
       });
-      if (!res.success) throw new Error(res.error ?? 'Query failed');
+      if (!res.success) throw new Error(res.error ?? trLoose('editor.queryFailed'));
       const lastQuery = res.results?.findLast?.((r) => r.type === 'query');
       return lastQuery?.rows ?? [];
     },
@@ -159,7 +162,7 @@ function TableEditorInner() {
         setSelected(first);
       }
     } catch (err) {
-      setTablesError((err as ApiError | Error).message ?? 'Failed to load tables.');
+      setTablesError((err as ApiError | Error).message ?? trLoose('editor.loadTablesFailed'));
     } finally {
       setTablesLoading(false);
     }
@@ -204,7 +207,7 @@ function TableEditorInner() {
         const rowsData = (await res.json()) as Array<Record<string, unknown>>;
         setRows(Array.isArray(rowsData) ? rowsData : []);
       } catch (err) {
-        setTableError((err as Error).message ?? 'Failed to load table.');
+        setTableError((err as Error).message ?? trLoose('editor.loadTableFailed'));
       } finally {
         setTableLoading(false);
       }
@@ -255,13 +258,14 @@ function TableEditorInner() {
       <aside className="flex w-64 flex-col border-r border-border">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Tables {tables.length > 0 ? `· ${tables.length}` : ''}
+            {tr('editor.tables')}
+            {tables.length > 0 ? ` · ${tables.length}` : ''}
           </span>
           <div className="flex gap-0.5">
-            <Button size="icon" variant="ghost" aria-label="New table" onClick={() => setCreateTableOpen(true)}>
+            <Button size="icon" variant="ghost" aria-label={trLoose('editor.newTable')} onClick={() => setCreateTableOpen(true)}>
               <Plus className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="ghost" aria-label="Refresh" onClick={loadTables}>
+            <Button size="icon" variant="ghost" aria-label={trLoose('editor.refresh')} onClick={loadTables}>
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
@@ -272,7 +276,7 @@ function TableEditorInner() {
             onChange={(e) => setSchemaFilter(e.target.value)}
             className="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs"
           >
-            <option value="all">All schemas</option>
+            <option value="all">{tr('editor.allSchemas')}</option>
             {availableSchemas.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -282,7 +286,7 @@ function TableEditorInner() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search tables"
+              placeholder={trLoose('editor.searchTables')}
               value={tableQuery}
               onChange={(e) => setTableQuery(e.target.value)}
               className="h-8 pl-7 text-xs"
@@ -293,9 +297,9 @@ function TableEditorInner() {
           {tablesError ? (
             <p className="px-2 text-xs text-destructive">{tablesError}</p>
           ) : tablesLoading ? (
-            <p className="px-2 text-xs text-muted-foreground">Loading…</p>
+            <p className="px-2 text-xs text-muted-foreground">{tr('editor.loading')}</p>
           ) : Object.keys(grouped).length === 0 ? (
-            <p className="px-2 text-xs text-muted-foreground">No tables.</p>
+            <p className="px-2 text-xs text-muted-foreground">{tr('editor.noTables')}</p>
           ) : (
             Object.entries(grouped).map(([schema, list]) => (
               <div key={schema} className="mb-3">
@@ -334,10 +338,10 @@ function TableEditorInner() {
               <>
                 <span className="text-xs text-muted-foreground">{selected.schema}.</span>
                 <h2 className="text-sm font-semibold">{selected.name}</h2>
-                <Badge variant="outline">{rows.length} rows</Badge>
+                <Badge variant="outline">{tr('editor.rows', { n: rows.length })}</Badge>
               </>
             ) : (
-              <h2 className="text-sm font-semibold text-muted-foreground">No table selected</h2>
+              <h2 className="text-sm font-semibold text-muted-foreground">{tr('editor.noTableSelected')}</h2>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -348,7 +352,8 @@ function TableEditorInner() {
               disabled={!selected || columns.length === 0}
             >
               <Filter className="h-3.5 w-3.5" />
-              Filter {filters.length > 0 ? `(${filters.length})` : ''}
+              {tr('editor.filter')}
+              {filters.length > 0 ? ` (${filters.length})` : ''}
             </Button>
             <Button
               size="sm"
@@ -356,14 +361,14 @@ function TableEditorInner() {
               onClick={() => selected && loadTable(selected, filters)}
               disabled={!selected}
             >
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+              <RefreshCw className="h-3.5 w-3.5" /> {tr('editor.refresh')}
             </Button>
             <Button
               size="sm"
               onClick={() => setEditing({ mode: 'insert', initial: null })}
               disabled={!selected || columns.length === 0}
             >
-              <Plus className="h-3.5 w-3.5" /> Insert
+              <Plus className="h-3.5 w-3.5" /> {tr('editor.insert')}
             </Button>
           </div>
         </header>
@@ -384,10 +389,10 @@ function TableEditorInner() {
             {tableError}
           </pre>
         ) : tableLoading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading table…</p>
+          <p className="p-4 text-sm text-muted-foreground">{tr('editor.loadingTable')}</p>
         ) : !selected ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Pick a table from the sidebar.
+            {tr('editor.pickTable')}
           </div>
         ) : (
           <div className="flex-1 overflow-auto">
@@ -411,7 +416,7 @@ function TableEditorInner() {
                       <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
                         <span className="truncate font-mono" title={c.type}>{c.type}</span>
                         {!c.nullable && !c.isPk ? (
-                          <span className="shrink-0">· not null</span>
+                          <span className="shrink-0">· {tr('editor.notNull')}</span>
                         ) : null}
                       </div>
                     </th>
@@ -426,7 +431,7 @@ function TableEditorInner() {
                       colSpan={Math.max(1, columns.length + 1)}
                       className="px-3 py-12 text-center text-sm text-muted-foreground"
                     >
-                      No rows.
+                      {tr('editor.noRows')}
                     </td>
                   </tr>
                 ) : (
@@ -452,7 +457,7 @@ function TableEditorInner() {
                         <button
                           onClick={() => setEditing({ mode: 'edit', initial: row })}
                           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          title="Edit row"
+                          title={trLoose('editor.editRow')}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -536,6 +541,8 @@ function CreateTableDialog({
   onClose: () => void;
   onCreated: (created: TableRef) => void;
 }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const [schema, setSchema] = useState(defaultSchema);
   const [name, setName] = useState('');
   const [cols, setCols] = useState<NewColumn[]>(() => defaultColumns());
@@ -587,11 +594,11 @@ function CreateTableDialog({
     setError(null);
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Table name is required.');
+      setError(trLoose('editor.nameRequired'));
       return;
     }
     if (cols.filter((c) => c.name.trim()).length === 0) {
-      setError('At least one column is required.');
+      setError(trLoose('editor.columnRequired'));
       return;
     }
     setSubmitting(true);
@@ -599,7 +606,7 @@ function CreateTableDialog({
       await runSql(buildSql());
       onCreated({ schema, name: trimmedName });
     } catch (err) {
-      setError((err as Error).message ?? 'Create failed.');
+      setError((err as Error).message ?? trLoose('editor.createFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -607,12 +614,12 @@ function CreateTableDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="max-w-3xl">
-      <DialogHeader title="New table" onClose={onClose} />
+      <DialogHeader title={trLoose('editor.newTable')} onClose={onClose} />
       <form onSubmit={submit}>
         <DialogBody className="max-h-[60vh] space-y-3 overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="ct-schema">Schema</Label>
+              <Label htmlFor="ct-schema">{tr('editor.schema')}</Label>
               <Input
                 id="ct-schema"
                 value={schema}
@@ -623,7 +630,7 @@ function CreateTableDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ct-name">Table name</Label>
+              <Label htmlFor="ct-name">{tr('editor.tableName')}</Label>
               <Input
                 id="ct-name"
                 value={name}
@@ -638,18 +645,18 @@ function CreateTableDialog({
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <Label>Columns</Label>
+              <Label>{tr('editor.columns')}</Label>
               <Button type="button" size="sm" variant="outline" onClick={addColumn}>
-                <Plus className="h-3.5 w-3.5" /> Add column
+                <Plus className="h-3.5 w-3.5" /> {tr('editor.addColumn')}
               </Button>
             </div>
             <div className="space-y-1.5">
               <div className="grid grid-cols-[1.5fr_1.5fr_36px_36px_1fr_28px] gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                <span>Name</span>
-                <span>Type</span>
-                <span title="Primary key">PK</span>
-                <span title="Not null">NN</span>
-                <span>Default</span>
+                <span>{tr('editor.colName')}</span>
+                <span>{tr('editor.colType')}</span>
+                <span title={trLoose('editor.primaryKey')}>PK</span>
+                <span title={trLoose('editor.notNullShort')}>NN</span>
+                <span>{tr('editor.default')}</span>
                 <span></span>
               </div>
               {cols.map((c) => (
@@ -657,7 +664,7 @@ function CreateTableDialog({
                   <Input
                     value={c.name}
                     onChange={(e) => update(c.id, { name: e.target.value })}
-                    placeholder="column"
+                    placeholder={trLoose('editor.columnPlaceholder')}
                     className="h-8 font-mono text-xs"
                   />
                   <select
@@ -676,14 +683,14 @@ function CreateTableDialog({
                     checked={c.pk}
                     onChange={(e) => update(c.id, { pk: e.target.checked })}
                     className="mx-auto"
-                    aria-label="Primary key"
+                    aria-label={trLoose('editor.primaryKey')}
                   />
                   <input
                     type="checkbox"
                     checked={c.notNull}
                     onChange={(e) => update(c.id, { notNull: e.target.checked })}
                     className="mx-auto"
-                    aria-label="Not null"
+                    aria-label={trLoose('editor.notNullShort')}
                   />
                   <Input
                     value={c.defaultExpr}
@@ -695,7 +702,7 @@ function CreateTableDialog({
                     type="button"
                     onClick={() => removeColumn(c.id)}
                     className="rounded-md p-1 text-muted-foreground hover:bg-accent"
-                    aria-label="Remove column"
+                    aria-label={trLoose('editor.removeColumn')}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -705,7 +712,7 @@ function CreateTableDialog({
           </div>
 
           <details className="rounded-md border border-border p-2">
-            <summary className="cursor-pointer text-xs text-muted-foreground">Preview SQL</summary>
+            <summary className="cursor-pointer text-xs text-muted-foreground">{tr('editor.previewSql')}</summary>
             <pre className="mt-2 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px]">
               {buildSql()}
             </pre>
@@ -715,10 +722,10 @@ function CreateTableDialog({
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('editor.cancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create table'}
+            {submitting ? trLoose('editor.creating') : trLoose('editor.createTable')}
           </Button>
         </DialogFooter>
       </form>
@@ -753,6 +760,8 @@ function FilterPanel({
   onClear: () => void;
   onClose: () => void;
 }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   function addFilter() {
     const col = columns[0];
     if (!col) return;
@@ -770,7 +779,7 @@ function FilterPanel({
   return (
     <div className="space-y-2 border-b border-border bg-card/40 px-4 py-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Filters</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr('editor.filters')}</span>
         <div className="flex gap-1">
           <Button size="sm" variant="ghost" onClick={onClose}>
             <X className="h-3.5 w-3.5" />
@@ -778,7 +787,9 @@ function FilterPanel({
         </div>
       </div>
       {filters.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No filters. Click <strong>Add filter</strong> to add one.</p>
+        <p className="text-xs text-muted-foreground">
+          {tr('editor.noFiltersPrefix')} <strong>{tr('editor.addFilter')}</strong> {tr('editor.noFiltersSuffix')}
+        </p>
       ) : (
         <div className="space-y-1.5">
           {filters.map((f) => (
@@ -801,20 +812,20 @@ function FilterPanel({
               >
                 {OPERATORS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {o.labelKey ? trLoose(o.labelKey) : o.label}
                   </option>
                 ))}
               </select>
               <Input
                 value={f.value}
                 onChange={(e) => update(f.id, { value: e.target.value })}
-                placeholder="value"
+                placeholder={trLoose('editor.valuePlaceholder')}
                 className="h-7 flex-1 text-xs"
               />
               <button
                 onClick={() => removeFilter(f.id)}
                 className="rounded-md p-1 text-muted-foreground hover:bg-accent"
-                aria-label="Remove filter"
+                aria-label={trLoose('editor.removeFilter')}
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -824,23 +835,20 @@ function FilterPanel({
       )}
       <div className="flex items-center justify-between pt-1">
         <Button size="sm" variant="outline" onClick={addFilter}>
-          <Plus className="h-3.5 w-3.5" /> Add filter
+          <Plus className="h-3.5 w-3.5" /> {tr('editor.addFilter')}
         </Button>
         <div className="flex gap-1.5">
           {filters.length > 0 ? (
             <Button size="sm" variant="ghost" onClick={onClear}>
-              Clear
+              {tr('editor.clear')}
             </Button>
           ) : null}
           <Button size="sm" onClick={onApply}>
-            Apply
+            {tr('editor.apply')}
           </Button>
         </div>
       </div>
-      <p className="pt-1 text-[10px] text-muted-foreground">
-        Operators map to PostgREST query syntax: <code>eq, neq, gt, gte, lt, lte, like, ilike, in, is</code>.
-        For <code>in</code>: <code>(a,b,c)</code>. For <code>is</code>: <code>null</code>, <code>true</code>, <code>false</code>.
-      </p>
+      <p className="pt-1 text-[10px] text-muted-foreground">{tr('editor.operatorsHint')}</p>
     </div>
   );
 }
@@ -856,6 +864,8 @@ interface RowEditorProps {
 }
 
 function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSaved }: RowEditorProps) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const [values, setValues] = useState<Record<string, string>>(() => initialValues(columns, initial));
   const [nullFlags, setNullFlags] = useState<Record<string, boolean>>(() => initialNullFlags(columns, initial));
   const [submitting, setSubmitting] = useState(false);
@@ -887,7 +897,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
         continue;
       }
       try {
-        body[c.name] = parseValue(c, raw);
+        body[c.name] = parseValue(c, raw, trLoose);
       } catch (e) {
         return { body, error: `${c.name}: ${(e as Error).message}` };
       }
@@ -914,7 +924,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
           prefer: 'return=representation',
         });
       } else {
-        if (!pk) throw new Error('Table has no primary key — cannot update.');
+        if (!pk) throw new Error(trLoose('editor.noPkUpdate'));
         await restCall(
           `/rest/v1/${encodeURIComponent(table.name)}?${encodeURIComponent(pk.name)}=eq.${encodeURIComponent(pkValue)}`,
           { method: 'PATCH', schema: table.schema, apikey, body, prefer: 'return=representation' }
@@ -922,7 +932,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
       }
       onSaved();
     } catch (err) {
-      setError((err as Error).message ?? 'Save failed.');
+      setError((err as Error).message ?? trLoose('editor.saveFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -930,7 +940,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
 
   async function doDelete() {
     if (!pk) {
-      setError('Table has no primary key — cannot delete.');
+      setError(trLoose('editor.noPkDelete'));
       return;
     }
     setSubmitting(true);
@@ -942,7 +952,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
       );
       onSaved();
     } catch (err) {
-      setError((err as Error).message ?? 'Delete failed.');
+      setError((err as Error).message ?? trLoose('editor.deleteFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -951,7 +961,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
   return (
     <Dialog open onClose={onClose} size="max-w-2xl">
       <DialogHeader
-        title={mode === 'insert' ? `Insert into ${table.name}` : `Edit row in ${table.name}`}
+        title={mode === 'insert' ? trLoose('editor.insertInto', { table: table.name }) : trLoose('editor.editRowIn', { table: table.name })}
         description={mode === 'edit' && pk ? `${pk.name} = ${pkValue}` : undefined}
         onClose={onClose}
       />
@@ -975,7 +985,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
                         checked={isNull}
                         onChange={(e) => setNull(c.name, e.target.checked)}
                       />
-                      null
+                      {tr('editor.null')}
                     </label>
                   ) : null}
                 </div>
@@ -987,7 +997,7 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
                   disabled={readOnly || isNull}
                 />
                 {mode === 'insert' && c.hasDefault ? (
-                  <p className="text-[10px] text-muted-foreground">Leave blank to use column default.</p>
+                  <p className="text-[10px] text-muted-foreground">{tr('editor.defaultHint')}</p>
                 ) : null}
               </div>
             );
@@ -998,12 +1008,12 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
           {mode === 'edit' ? (
             confirmingDelete ? (
               <>
-                <span className="mr-auto text-xs text-destructive">Delete this row?</span>
+                <span className="mr-auto text-xs text-destructive">{tr('editor.deleteRow')}</span>
                 <Button type="button" variant="outline" size="sm" onClick={() => setConfirmingDelete(false)} disabled={submitting}>
-                  Cancel
+                  {tr('editor.cancel')}
                 </Button>
                 <Button type="button" variant="destructive" size="sm" onClick={doDelete} disabled={submitting}>
-                  {submitting ? 'Deleting…' : 'Yes, delete'}
+                  {submitting ? trLoose('editor.deleting') : trLoose('editor.yesDelete')}
                 </Button>
               </>
             ) : (
@@ -1015,17 +1025,17 @@ function RowEditorDialog({ mode, table, columns, initial, apikey, onClose, onSav
                 disabled={submitting || !pk}
                 className="mr-auto"
               >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
+                <Trash2 className="h-3.5 w-3.5" /> {tr('editor.delete')}
               </Button>
             )
           ) : null}
           {!confirmingDelete ? (
             <>
               <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={submitting}>
-                Cancel
+                {tr('editor.cancel')}
               </Button>
               <Button type="submit" size="sm" disabled={submitting}>
-                {submitting ? 'Saving…' : mode === 'insert' ? 'Insert' : 'Save'}
+                {submitting ? trLoose('editor.saving') : mode === 'insert' ? trLoose('editor.insert') : trLoose('editor.save')}
               </Button>
             </>
           ) : null}
@@ -1048,6 +1058,8 @@ function FieldInput({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const t = col.type.toLowerCase();
   if (t === 'boolean') {
     return (
@@ -1058,7 +1070,7 @@ function FieldInput({
         disabled={disabled}
         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm disabled:opacity-50"
       >
-        <option value="">(unset)</option>
+        <option value="">{trLoose('editor.unset')}</option>
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
@@ -1072,7 +1084,7 @@ function FieldInput({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         rows={3}
-        placeholder={t.endsWith('[]') ? 'JSON array, e.g. ["a","b"]' : '{"key": "value"}'}
+        placeholder={t.endsWith('[]') ? trLoose('editor.jsonArrayPlaceholder') : '{"key": "value"}'}
         className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm disabled:opacity-50"
       />
     );
@@ -1117,30 +1129,30 @@ function initialNullFlags(columns: ColumnInfo[], row: Record<string, unknown> | 
   return out;
 }
 
-function parseValue(c: ColumnInfo, raw: string): unknown {
+function parseValue(c: ColumnInfo, raw: string, trLoose: (key: string, values?: Record<string, string | number>) => string): unknown {
   const t = c.type.toLowerCase();
   if (t === 'boolean') {
     if (raw === 'true') return true;
     if (raw === 'false') return false;
-    throw new Error('expected true or false');
+    throw new Error(trLoose('editor.errBool'));
   }
   if (t === 'json' || t === 'jsonb' || t.endsWith('[]')) {
     try {
       return JSON.parse(raw);
     } catch {
-      throw new Error('invalid JSON');
+      throw new Error(trLoose('editor.errJson'));
     }
   }
   const numeric = ['smallint', 'integer', 'bigint'];
   if (numeric.some((n) => t.includes(n))) {
     const n = Number(raw);
-    if (!Number.isInteger(n)) throw new Error('expected integer');
+    if (!Number.isInteger(n)) throw new Error(trLoose('editor.errInt'));
     return n;
   }
   const floats = ['real', 'double precision', 'numeric', 'decimal'];
   if (floats.some((n) => t.includes(n))) {
     const n = Number(raw);
-    if (Number.isNaN(n)) throw new Error('expected number');
+    if (Number.isNaN(n)) throw new Error(trLoose('editor.errNumber'));
     return n;
   }
   return raw;

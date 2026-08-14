@@ -17,6 +17,7 @@ import { API_BASE, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef, useRouteSegmentAfter } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface StorageObject {
   name: string;
@@ -45,6 +46,7 @@ export default function BucketBrowserPage({
 }
 
 function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; bucketId: string }) {
+  const { tr } = useI18n();
   const { project } = useSession();
   const apikey = project!.apikey;
 
@@ -85,7 +87,7 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
         const data = (await res.json()) as StorageObject[];
         setObjects(Array.isArray(data) ? data : []);
       } catch (err) {
-        setError((err as Error).message ?? 'Failed to list objects.');
+        setError((err as Error).message ?? tr('bucket.listFailed'));
       } finally {
         setLoading(false);
       }
@@ -125,11 +127,11 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
       );
       if (!res.ok) {
         const body = await res.text().catch(() => res.statusText);
-        throw new Error(`Upload ${res.status}: ${body}`);
+        throw new Error(`${tr('bucket.uploadFailed')} (${res.status}): ${body}`);
       }
       await load();
     } catch (err) {
-      setError((err as Error).message ?? 'Upload failed.');
+      setError((err as Error).message ?? tr('bucket.uploadFailed'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -137,7 +139,7 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
   }
 
   async function deleteFile(name: string) {
-    if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+    if (!confirm(`${tr('bucket.deleteConfirmPrefix')} ${name}${tr('bucket.deleteConfirmSuffix')}`)) return;
     try {
       const targetPath = (prefix + name).replace(/^\/+/, '');
       const res = await fetch(
@@ -147,7 +149,7 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
       if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => res.statusText)}`);
       await load();
     } catch (err) {
-      setError((err as Error).message ?? 'Delete failed.');
+      setError((err as Error).message ?? tr('bucket.deleteFailed'));
     }
   }
 
@@ -169,12 +171,12 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2 text-sm">
           <Link href={`/project/${projectRef}/storage`}>
-            <Button size="icon" variant="ghost" aria-label="Back to buckets">
+            <Button size="icon" variant="ghost" aria-label={tr('bucket.backToBuckets')}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
           </Link>
           <h2 className="font-semibold">{bucketId}</h2>
-          <Badge variant="outline">{objects.length} items</Badge>
+          <Badge variant="outline">{tr('bucket.items', { n: objects.length })}</Badge>
         </div>
         <div className="flex items-center gap-2">
           <form
@@ -186,14 +188,14 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
           >
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search name…"
+              placeholder={tr('bucket.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 w-56 pl-7 text-xs"
             />
           </form>
           <Button size="sm" variant="outline" onClick={() => load()}>
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <RefreshCw className="h-3.5 w-3.5" /> {tr('bucket.refresh')}
           </Button>
           <input
             ref={fileInputRef}
@@ -205,7 +207,7 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
             }}
           />
           <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            <Upload className="h-3.5 w-3.5" /> {uploading ? 'Uploading…' : 'Upload'}
+            <Upload className="h-3.5 w-3.5" /> {uploading ? tr('bucket.uploading') : tr('bucket.upload')}
           </Button>
         </div>
       </header>
@@ -236,13 +238,13 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
             <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
           </Card>
         ) : loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+          <p className="p-4 text-sm text-muted-foreground">{tr('bucket.loading')}</p>
         ) : objects.length === 0 ? (
           <Card className="m-4">
             <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
               <FileIcon className="h-7 w-7 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
-                {prefix ? 'Folder is empty.' : 'Bucket is empty. Upload a file to get started.'}
+                {prefix ? tr('bucket.folderEmpty') : tr('bucket.bucketEmpty')}
               </p>
             </CardContent>
           </Card>
@@ -250,9 +252,9 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="px-4 py-2 text-left font-medium">Name</th>
-                <th className="px-4 py-2 text-left font-medium">Size</th>
-                <th className="px-4 py-2 text-left font-medium">Modified</th>
+                <th className="px-4 py-2 text-left font-medium">{tr('bucket.colName')}</th>
+                <th className="px-4 py-2 text-left font-medium">{tr('bucket.colSize')}</th>
+                <th className="px-4 py-2 text-left font-medium">{tr('bucket.colModified')}</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
@@ -288,14 +290,14 @@ function BucketBrowserInner({ projectRef, bucketId }: { projectRef: string; buck
                     <td className="px-4 py-2 text-xs text-muted-foreground">{formatDate(f.updated_at)}</td>
                     <td className="px-4 py-2 text-right">
                       <a href={downloadHref(f.name)} target="_blank" rel="noreferrer">
-                        <Button size="icon" variant="ghost" aria-label="Download">
+                        <Button size="icon" variant="ghost" aria-label={tr('bucket.downloadAria')}>
                           <Download className="h-3.5 w-3.5" />
                         </Button>
                       </a>
                       <button
                         onClick={() => deleteFile(f.name)}
                         className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-                        aria-label="Delete"
+                        aria-label={tr('bucket.deleteAria')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

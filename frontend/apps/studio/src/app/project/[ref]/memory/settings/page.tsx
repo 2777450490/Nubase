@@ -32,6 +32,7 @@ import {
 } from '@nubase/ui';
 import { apiFetch, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
+import { useI18n } from '@/lib/i18n';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { MemorySubNav } from '../_components/sub-nav';
 import { useProjectRef } from '@/lib/route-params';
@@ -87,6 +88,8 @@ export default function MemorySettingsPage({ params }: { params: { ref: string }
 }
 
 function SettingsInner({ projectRef }: { projectRef: string }) {
+  const { tr } = useI18n();
+  const trLoose = (key: string, values?: Record<string, string | number>) => tr(key as any, values);
   const { project, platformKey } = useSession();
   const apikey = project!.apikey;
   const router = useRouter();
@@ -115,7 +118,7 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
       setConfig(c);
       setDraft(draftFromConfig(c));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load configuration.');
+      setError((err as ApiError).message ?? trLoose('memSettings.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -137,11 +140,11 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
       });
       setConfig(updated);
       setDraft(draftFromConfig(updated));
-      setSaveResult({ ok: true, message: 'Saved.' });
+      setSaveResult({ ok: true, message: trLoose('memSettings.saved') });
     } catch (err) {
       setSaveResult({
         ok: false,
-        message: (err as ApiError).message ?? 'Save failed.',
+        message: (err as ApiError).message ?? trLoose('memSettings.saveFailed'),
       });
     } finally {
       setSaving(false);
@@ -169,18 +172,17 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
       if (res.success) {
         setMigrateResult({
           ok: true,
-          message:
-            `Schema migrated successfully. ${res.steps?.length ?? 0} step(s) executed.`,
+          message: trLoose('memSettings.migrated', { n: res.steps?.length ?? 0 }),
         });
         // Refresh config in case dimensions/fts-config affect anything visible.
         await load();
       } else {
-        setMigrateResult({ ok: false, message: res.error ?? 'Migration failed.' });
+        setMigrateResult({ ok: false, message: res.error ?? trLoose('memSettings.migrationFailed') });
       }
     } catch (err) {
       setMigrateResult({
         ok: false,
-        message: (err as ApiError).message ?? 'Migration failed.',
+        message: (err as ApiError).message ?? trLoose('memSettings.migrationFailed'),
       });
     } finally {
       setMigrating(false);
@@ -200,13 +202,13 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
       await apiFetch('/mem/v1/reset', { apikey, method: 'POST' });
       setResetResult({
         ok: true,
-        message: 'All memory data has been wiped. Tenant is now empty.',
+        message: trLoose('memSettings.resetDone'),
       });
       setResetTypedName('');
     } catch (err) {
       setResetResult({
         ok: false,
-        message: (err as ApiError).message ?? 'Reset failed.',
+        message: (err as ApiError).message ?? trLoose('memSettings.resetFailed'),
       });
     } finally {
       setResetting(false);
@@ -221,26 +223,25 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
         <div className="mx-auto max-w-4xl space-y-6 p-6">
           <header className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-semibold">Memory settings</h1>
+              <h1 className="text-lg font-semibold">{tr('memSettings.title')}</h1>
               <p className="text-xs text-muted-foreground">
-                Runtime configuration for the {projectRef} tenant. Editable fields override
-                the platform <code className="mx-1 rounded bg-muted/40 px-1">application.yml</code>
-                defaults and take effect immediately. Locked fields are baked into the
-                schema (re-init required to change).
+                {tr('memSettings.descPrefix', { ref: projectRef })}{' '}
+                <code className="mx-1 rounded bg-muted/40 px-1">application.yml</code>{' '}
+                {tr('memSettings.descSuffix')}
               </p>
             </div>
             <div className="flex items-center gap-2">
               {dirty && (
                 <Button size="sm" variant="outline" onClick={revert} disabled={saving}>
-                  Discard
+                  {tr('memSettings.discard')}
                 </Button>
               )}
               <Button size="sm" variant="brand" onClick={save} disabled={!dirty || saving}>
                 <Save className={'h-3.5 w-3.5 ' + (saving ? 'animate-pulse' : '')} />
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? trLoose('memSettings.saving') : trLoose('memSettings.save')}
               </Button>
               <Button size="sm" variant="outline" onClick={load} disabled={loading || saving}>
-                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> Refresh
+                <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} /> {tr('memSettings.refresh')}
               </Button>
             </div>
           </header>
@@ -260,7 +261,7 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
           )}
 
           {loading && !config && (
-            <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">{tr('memSettings.loading')}</p>
           )}
 
           {config && (
@@ -268,14 +269,14 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
               {/* Feature flag */}
               <SectionCard
                 icon={Brain}
-                title="Feature"
-                description="Top-level switch — when off, mem APIs return 404 and tenant inits skip the mem schema."
+                title={tr('memSettings.sFeature')}
+                description={tr('memSettings.sFeatureDesc')}
               >
-                <Row label="Enabled">
+                <Row label={tr('memSettings.enabled')}>
                   <BoolBadge value={config.enabled} />
-                  <Locked reason="Toggled via nubase.mem.enabled in application.yml — requires restart" />
+                  <Locked reason={trLoose('memSettings.lockFeature')} />
                 </Row>
-                <Row label="History audit">
+                <Row label={tr('memSettings.historyAudit')}>
                   <BoolInput
                     value={draft.historyEnabled}
                     onChange={(v) => setDraft({ ...draft, historyEnabled: v })}
@@ -286,10 +287,10 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
               {/* Chat LLM */}
               <SectionCard
                 icon={Cpu}
-                title="Chat LLM (fact extraction + decision)"
-                description="Used by add() to extract facts and decide ADD / UPDATE / DELETE / NONE, and by search() to extract query entities when boost is on. Each project picks its own provider and model."
+                title={tr('memSettings.sChat')}
+                description={tr('memSettings.sChatDesc')}
               >
-                <Row label="Provider">
+                <Row label={tr('memSettings.provider')}>
                   <SelectInput
                     value={draft.chatProvider}
                     onChange={(v) => setDraft({ ...draft, chatProvider: v })}
@@ -297,14 +298,14 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                   />
                   <ProviderStatusBadge available={config.providerStatus.chatAvailable} />
                 </Row>
-                <Row label="Model">
+                <Row label={tr('memSettings.model')}>
                   <TextInput
                     value={draft.chatModel}
                     onChange={(v) => setDraft({ ...draft, chatModel: v })}
                     placeholder="gpt-4o-mini"
                   />
                 </Row>
-                <Row label="Temperature">
+                <Row label={tr('memSettings.temperature')}>
                   <NumberInput
                     value={draft.chatTemperature}
                     min={0}
@@ -318,10 +319,10 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
               {/* Embedding */}
               <SectionCard
                 icon={Layers}
-                title="Embedding"
-                description="Vectorizes memories and search queries. Provider + model are per-project; dimensions are baked into the pgvector column and stay platform-wide."
+                title={tr('memSettings.sEmbedding')}
+                description={tr('memSettings.sEmbeddingDesc')}
               >
-                <Row label="Provider">
+                <Row label={tr('memSettings.provider')}>
                   <SelectInput
                     value={draft.embeddingProvider}
                     onChange={(v) => setDraft({ ...draft, embeddingProvider: v })}
@@ -329,36 +330,36 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                   />
                   <ProviderStatusBadge available={config.providerStatus.embeddingAvailable} />
                 </Row>
-                <Row label="Model">
+                <Row label={tr('memSettings.model')}>
                   <TextInput
                     value={draft.embeddingModel}
                     onChange={(v) => setDraft({ ...draft, embeddingModel: v })}
                     placeholder="text-embedding-3-small"
                   />
                   <span className="ml-2 text-[10px] text-muted-foreground">
-                    must output {config.embedding.dimensions} dims
+                    {trLoose('memSettings.mustOutputDims', { n: config.embedding.dimensions })}
                   </span>
                 </Row>
-                <Row label="Dimensions">
+                <Row label={tr('memSettings.dimensions')}>
                   <span className="font-medium">{config.embedding.dimensions}</span>
-                  <Locked reason="pgvector column type — change requires re-init of the mem schema" />
+                  <Locked reason={trLoose('memSettings.lockDimensions')} />
                 </Row>
-                <Row label="In-proc cache">
+                <Row label={tr('memSettings.inProcCache')}>
                   <BoolBadge value={config.embedding.cacheEnabled} />
                   {config.embedding.cacheEnabled && (
                     <span className="ml-2 text-[10px] text-muted-foreground">
-                      max {config.embedding.cacheMaximumSize.toLocaleString()} / TTL {config.embedding.cacheTtlMinutes}m
+                      {trLoose('memSettings.cacheHint', { max: config.embedding.cacheMaximumSize.toLocaleString(), ttl: config.embedding.cacheTtlMinutes })}
                     </span>
                   )}
-                  <Locked reason="Caffeine bean built at startup — change requires restart" />
+                  <Locked reason={trLoose('memSettings.lockCache')} />
                 </Row>
               </SectionCard>
 
               {/* Provider credentials */}
               <SectionCard
                 icon={Cpu}
-                title="Provider credentials"
-                description="API keys and base URLs per provider. Sensitive — keys never round-trip back to the browser; leave blank to keep, type to rotate."
+                title={tr('memSettings.sCreds')}
+                description={tr('memSettings.sCredsDesc')}
               >
                 <ProviderCredsBlock
                   label="OpenAI"
@@ -379,7 +380,7 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                   baseUrlPlaceholder="https://api.anthropic.com"
                 />
                 <ProviderCredsBlock
-                  label="Generic OpenAI-compatible"
+                  label={tr('memSettings.providerGeneric')}
                   baseUrl={draft.genericBaseUrl}
                   setBaseUrl={(v) => setDraft({ ...draft, genericBaseUrl: v })}
                   authToken={draft.genericAuthToken}
@@ -392,10 +393,10 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
               {/* Search */}
               <SectionCard
                 icon={Search}
-                title="Search"
-                description="Multi-signal fusion: vector (cosine) + BM25 + (optional) entity boost."
+                title={tr('memSettings.sSearch')}
+                description={tr('memSettings.sSearchDesc')}
               >
-                <Row label="Default top-K">
+                <Row label={tr('memSettings.defaultTopK')}>
                   <NumberInput
                     value={draft.searchDefaultTopK}
                     min={1}
@@ -403,22 +404,22 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                     onChange={(v) => setDraft({ ...draft, searchDefaultTopK: v })}
                   />
                 </Row>
-                <Row label="Default threshold">
+                <Row label={tr('memSettings.defaultThreshold')}>
                   <NumberInput
                     value={draft.searchDefaultThreshold}
                     min={0}
                     step={0.05}
                     onChange={(v) => setDraft({ ...draft, searchDefaultThreshold: v })}
                   />
-                  <span className="ml-2 text-[10px] text-muted-foreground">cosine distance cap</span>
+                  <span className="ml-2 text-[10px] text-muted-foreground">{tr('memSettings.cosineCap')}</span>
                 </Row>
-                <Row label="Entity boost">
+                <Row label={tr('memSettings.entityBoost')}>
                   <BoolInput
                     value={draft.searchEntityBoostEnabled}
                     onChange={(v) => setDraft({ ...draft, searchEntityBoostEnabled: v })}
                   />
                 </Row>
-                <Row label="Entity match similarity">
+                <Row label={tr('memSettings.entityMatchSimilarity')}>
                   <NumberInput
                     value={draft.searchEntityMatchSimilarity}
                     min={0}
@@ -430,30 +431,30 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                     disabled={!draft.searchEntityBoostEnabled}
                   />
                 </Row>
-                <Row label="BM25 fts-config">
+                <Row label={tr('memSettings.bm25FtsConfig')}>
                   <code className="text-xs">{config.search.ftsConfig}</code>
                   <span className="ml-2 text-[10px] text-muted-foreground">
-                    {config.search.ftsConfig === 'simple' && 'no stemming, works for any whitespace-separated language'}
-                    {config.search.ftsConfig === 'english' && 'Snowball stemmer + stopwords'}
-                    {config.search.ftsConfig === 'zhparser' && 'Chinese (requires zhparser PG extension)'}
+                    {config.search.ftsConfig === 'simple' && trLoose('memSettings.ftsSimple')}
+                    {config.search.ftsConfig === 'english' && trLoose('memSettings.ftsEnglish')}
+                    {config.search.ftsConfig === 'zhparser' && trLoose('memSettings.ftsZhparser')}
                   </span>
-                  <Locked reason="GIN index uses this config — re-init mem schema to change" />
+                  <Locked reason={trLoose('memSettings.lockFts')} />
                 </Row>
               </SectionCard>
 
               {/* Session */}
               <SectionCard
                 icon={HistoryIcon}
-                title="Session window"
-                description="Recent messages per owner triple, used as rolling context for fact extraction."
+                title={tr('memSettings.sSession')}
+                description={tr('memSettings.sSessionDesc')}
               >
-                <Row label="Enabled">
+                <Row label={tr('memSettings.enabled')}>
                   <BoolInput
                     value={draft.sessionEnabled}
                     onChange={(v) => setDraft({ ...draft, sessionEnabled: v })}
                   />
                 </Row>
-                <Row label="Max messages">
+                <Row label={tr('memSettings.maxMessages')}>
                   <NumberInput
                     value={draft.sessionMaxMessages}
                     min={1}
@@ -462,7 +463,7 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                     disabled={!draft.sessionEnabled}
                   />
                 </Row>
-                <Row label="Inject into extraction">
+                <Row label={tr('memSettings.injectIntoExtraction')}>
                   <BoolInput
                     value={draft.sessionInjectIntoExtraction}
                     onChange={(v) =>
@@ -476,10 +477,10 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
               {/* Entity cap */}
               <SectionCard
                 icon={Network}
-                title="Entity store"
-                description="Caps array size of mem.entities.linked_memory_ids to prevent hot-entity blow-up."
+                title={tr('memSettings.sEntity')}
+                description={tr('memSettings.sEntityDesc')}
               >
-                <Row label="Max links per entity">
+                <Row label={tr('memSettings.maxLinksPerEntity')}>
                   <NumberInput
                     value={draft.entityMaxLinkedMemoryIds}
                     min={1}
@@ -496,17 +497,17 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                 <CardContent className="p-4">
                   <div className="mb-3 flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-destructive" />
-                    <h2 className="text-sm font-semibold text-destructive">Danger zone</h2>
+                    <h2 className="text-sm font-semibold text-destructive">{tr('memSettings.dangerZone')}</h2>
                   </div>
 
                   {/* Migrate */}
                   <div className="flex items-start justify-between gap-4 border-t border-border pt-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">Migrate mem-schema</div>
+                      <div className="text-sm font-medium">{tr('memSettings.migrateTitle')}</div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Re-runs <code className="rounded bg-muted/40 px-1">init_mem_schema.sql</code> and the role
-                        grants on this tenant. Idempotent — safe on tenants already up-to-date. Required for
-                        tenants initialized before this codebase shipped the mem schema.
+                        {tr('memSettings.migrateDescPrefix')}{' '}
+                        <code className="rounded bg-muted/40 px-1">init_mem_schema.sql</code>{' '}
+                        {tr('memSettings.migrateDescSuffix')}
                       </p>
                       {migrateResult && (
                         <div
@@ -530,19 +531,22 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                       onClick={() => { setMigrateResult(null); setConfirmMigrate(true); }}
                       disabled={migrating}
                     >
-                      <Wrench className="h-3.5 w-3.5" /> {migrating ? 'Migrating…' : 'Migrate'}
+                      <Wrench className="h-3.5 w-3.5" /> {migrating ? trLoose('memSettings.migrating') : trLoose('memSettings.migrate')}
                     </Button>
                   </div>
 
                   {/* Reset */}
                   <div className="mt-4 flex items-start justify-between gap-4 border-t border-border pt-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-destructive">Reset all memory data</div>
+                      <div className="text-sm font-medium text-destructive">{tr('memSettings.resetTitle')}</div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        TRUNCATE every row in <code className="rounded bg-muted/40 px-1">mem.memories</code>,
-                        <code className="mx-1 rounded bg-muted/40 px-1">mem.memory_history</code>,
-                        <code className="rounded bg-muted/40 px-1">mem.session_messages</code> and
-                        <code className="mx-1 rounded bg-muted/40 px-1">mem.entities</code>. Cannot be undone.
+                        {tr('memSettings.resetDescPrefix')}{' '}
+                        <code className="rounded bg-muted/40 px-1">mem.memories</code>,{' '}
+                        <code className="rounded bg-muted/40 px-1">mem.memory_history</code>,{' '}
+                        <code className="rounded bg-muted/40 px-1">mem.session_messages</code>{' '}
+                        {tr('memSettings.resetDescAnd')}{' '}
+                        <code className="rounded bg-muted/40 px-1">mem.entities</code>
+                        {tr('memSettings.resetDescSuffix')}
                       </p>
                       {resetResult && (
                         <div
@@ -566,7 +570,7 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
                       onClick={() => { setResetResult(null); setResetTypedName(''); setConfirmReset(true); }}
                       disabled={resetting}
                     >
-                      <Trash2 className="h-3.5 w-3.5" /> {resetting ? 'Resetting…' : 'Reset'}
+                      <Trash2 className="h-3.5 w-3.5" /> {resetting ? trLoose('memSettings.resetting') : trLoose('memSettings.reset')}
                     </Button>
                   </div>
                 </CardContent>
@@ -578,39 +582,42 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
 
       {/* Migrate confirmation */}
       <Dialog open={confirmMigrate} onOpenChange={setConfirmMigrate}>
-        <DialogHeader>Migrate mem-schema for <code>{projectRef}</code>?</DialogHeader>
+        <DialogHeader>
+          {tr('memSettings.confirmMigratePrefix')} <code>{projectRef}</code>{tr('memSettings.confirmMigrateSuffix')}
+        </DialogHeader>
         <DialogBody>
           <p className="text-sm">
-            This will re-run the mem schema DDL and role grants for this tenant. The operation
-            is idempotent — every statement uses <code>IF NOT EXISTS</code> or
-            <code> DROP POLICY IF EXISTS</code> guards.
+            {tr('memSettings.confirmMigrateBodyPrefix')}{' '}
+            <code>IF NOT EXISTS</code> {tr('memSettings.confirmMigrateBodyMid')}{' '}
+            <code>DROP POLICY IF EXISTS</code> {tr('memSettings.confirmMigrateBodySuffix')}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            Requires the Postgres server to have pgvector installed. If it doesn&apos;t, the
-            call will fail loudly with the install instructions.
+            {tr('memSettings.confirmMigrateNote')}
           </p>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setConfirmMigrate(false)}>Cancel</Button>
-          <Button onClick={performMigrate}>Run migration</Button>
+          <Button variant="outline" onClick={() => setConfirmMigrate(false)}>{tr('memSettings.cancel')}</Button>
+          <Button onClick={performMigrate}>{tr('memSettings.runMigration')}</Button>
         </DialogFooter>
       </Dialog>
 
       {/* Reset confirmation */}
       <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
-        <DialogHeader>Reset all memory data?</DialogHeader>
+        <DialogHeader>{tr('memSettings.confirmResetTitle')}</DialogHeader>
         <DialogBody>
           <div className="space-y-3">
             <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                This permanently truncates every memory, history entry, entity, and session
-                message in <strong>{projectRef}</strong>. There is no undo.
+                {tr('memSettings.confirmResetBodyPrefix')} <strong>{projectRef}</strong>
+                {tr('memSettings.confirmResetBodySuffix')}
               </span>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">
-                Type <code className="rounded bg-muted/40 px-1">{resetExpected}</code> to confirm:
+                {tr('memSettings.typeToConfirmPrefix')}{' '}
+                <code className="rounded bg-muted/40 px-1">{resetExpected}</code>{' '}
+                {tr('memSettings.typeToConfirmSuffix')}
               </Label>
               <Input
                 value={resetTypedName}
@@ -622,9 +629,9 @@ function SettingsInner({ projectRef }: { projectRef: string }) {
           </div>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setConfirmReset(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => setConfirmReset(false)}>{tr('memSettings.cancel')}</Button>
           <Button variant="destructive" disabled={!resetUnlocked} onClick={performReset}>
-            I understand, reset
+            {tr('memSettings.confirmResetBtn')}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -673,13 +680,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function BoolBadge({ value }: { value: boolean }) {
+  const { tr } = useI18n();
   return value ? (
     <Badge variant="default" className="gap-1">
-      <CheckCircle2 className="h-3 w-3" /> on
+      <CheckCircle2 className="h-3 w-3" /> {tr('memSettings.on')}
     </Badge>
   ) : (
     <Badge variant="outline" className="gap-1 text-muted-foreground">
-      <XCircle className="h-3 w-3" /> off
+      <XCircle className="h-3 w-3" /> {tr('memSettings.off')}
     </Badge>
   );
 }
@@ -834,6 +842,7 @@ function BoolInput({
   onChange: (v: boolean) => void;
   disabled?: boolean;
 }) {
+  const { tr } = useI18n();
   return (
     <label className={'inline-flex items-center gap-2 ' + (disabled ? 'opacity-50' : '')}>
       <input
@@ -843,7 +852,7 @@ function BoolInput({
         disabled={disabled}
         className="h-3.5 w-3.5"
       />
-      <span className="text-xs text-muted-foreground">{value ? 'on' : 'off'}</span>
+      <span className="text-xs text-muted-foreground">{value ? tr('memSettings.on') : tr('memSettings.off')}</span>
     </label>
   );
 }
@@ -881,9 +890,10 @@ function NumberInput({
 }
 
 function Locked({ reason }: { reason: string }) {
+  const { tr } = useI18n();
   return (
     <span className="ml-2 text-[10px] text-muted-foreground" title={reason}>
-      🔒 locked
+      🔒 {tr('memSettings.locked')}
     </span>
   );
 }
@@ -941,13 +951,14 @@ function SelectInput({
 }
 
 function ProviderStatusBadge({ available }: { available: boolean }) {
+  const { tr } = useI18n();
   return available ? (
     <Badge variant="default" className="ml-2 gap-1 text-[10px]">
-      <CheckCircle2 className="h-3 w-3" /> key set
+      <CheckCircle2 className="h-3 w-3" /> {tr('memSettings.keySet')}
     </Badge>
   ) : (
     <Badge variant="outline" className="ml-2 gap-1 text-[10px] text-muted-foreground">
-      <XCircle className="h-3 w-3" /> no key
+      <XCircle className="h-3 w-3" /> {tr('memSettings.noKey')}
     </Badge>
   );
 }
@@ -969,37 +980,38 @@ function ProviderCredsBlock({
   tokenSet: boolean;
   baseUrlPlaceholder?: string;
 }) {
+  const { tr } = useI18n();
   return (
     <div className="rounded-md border border-border/40 bg-muted/20 p-3">
       <div className="mb-2 flex items-center gap-2">
         <span className="text-xs font-semibold">{label}</span>
         {tokenSet ? (
           <Badge variant="default" className="gap-1 text-[10px]">
-            <CheckCircle2 className="h-3 w-3" /> configured
+            <CheckCircle2 className="h-3 w-3" /> {tr('memSettings.configured')}
           </Badge>
         ) : (
           <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
-            <XCircle className="h-3 w-3" /> not configured
+            <XCircle className="h-3 w-3" /> {tr('memSettings.notConfigured')}
           </Badge>
         )}
       </div>
       <div className="grid grid-cols-[120px_1fr] items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Base URL</span>
+        <span className="text-muted-foreground">{tr('memSettings.baseUrl')}</span>
         <TextInput
           value={baseUrl}
           onChange={setBaseUrl}
           placeholder={baseUrlPlaceholder}
         />
-        <span className="text-muted-foreground">API key</span>
+        <span className="text-muted-foreground">{tr('memSettings.apiKey')}</span>
         <div className="flex items-center gap-2">
           <TextInput
             value={authToken}
             onChange={setAuthToken}
-            placeholder={tokenSet ? '••••••••  (leave blank to keep)' : 'sk-…'}
+            placeholder={tokenSet ? tr('memSettings.tokenKeepPlaceholder') : 'sk-…'}
             type="password"
           />
           <span className="text-[10px] text-muted-foreground">
-            {tokenSet ? 'rotate by typing a new value' : 'paste your provider key'}
+            {tokenSet ? tr('memSettings.tokenRotateHint') : tr('memSettings.tokenPasteHint')}
           </span>
         </div>
       </div>

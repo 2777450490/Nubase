@@ -7,6 +7,7 @@ import { ArrowRight, CheckCircle2, KeyRound, Loader2, ShieldCheck } from 'lucide
 import { Button, Card, CardContent, Input, cn } from '@nubase/ui';
 import { apiFetch, fetchAllProjects, type ApiError } from '@/lib/api';
 import { useSession } from '@/lib/session';
+import { useI18n } from '@/lib/i18n';
 
 interface ProjectSummary {
   ref: string;
@@ -35,6 +36,7 @@ export default function CliAuthorizePage() {
 }
 
 function CliAuthorizeContent() {
+  const { tr } = useI18n();
   const params = useSearchParams();
   const router = useRouter();
   const { platformKey, user, hasHydrated, signOut } = useSession();
@@ -75,7 +77,7 @@ function CliAuthorizeContent() {
           router.replace(`/login?next=${encodeURIComponent(`/cli/authorize?${params.toString()}`)}`);
           return;
         }
-        setError(parseError(err) ?? 'Failed to load projects.');
+        setError(parseError(err) ?? tr('cliAuth.loadFailed'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -135,12 +137,12 @@ function CliAuthorizeContent() {
       });
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || `Local callback failed with ${res.status}`);
+        throw new Error(text || tr('cliAuth.callbackFailed', { status: res.status }));
       }
       setStatus('done');
     } catch (err) {
       setStatus('idle');
-      setError((err as Error).message || 'Failed to authorize the CLI.');
+      setError((err as Error).message || tr('cliAuth.authFailed'));
     }
   }
 
@@ -159,15 +161,15 @@ function CliAuthorizeContent() {
           <div className="min-w-0">
             <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
               <KeyRound className="h-3.5 w-3.5" />
-              CLI authorization
+              {tr('cliAuth.badge')}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Authorize Nubase CLI</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{tr('cliAuth.title')}</h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Choose the project this local CLI should use for MCP tools and agent workflows.
+              {tr('cliAuth.desc')}
             </p>
           </div>
           <div className="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-            {sessionId ? `Session: ${sessionId}` : agentId ? `Agent: ${agentId}` : 'Local agent'}
+            {sessionId ? tr('cliAuth.session', { id: sessionId }) : agentId ? tr('cliAuth.agent', { id: agentId }) : tr('cliAuth.localAgent')}
           </div>
         </div>
       </section>
@@ -175,7 +177,7 @@ function CliAuthorizeContent() {
       {invalidRequest ? (
         <Card className="rounded-lg border-destructive/30 bg-destructive/5 shadow-none">
           <CardContent className="p-5 text-sm text-destructive">
-            This authorization request is invalid. Run the install command again to generate a fresh authorization URL.
+            {tr('cliAuth.invalidRequest')}
           </CardContent>
         </Card>
       ) : status === 'done' ? (
@@ -183,8 +185,8 @@ function CliAuthorizeContent() {
           <CardContent className="flex items-start gap-3 p-5">
             <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
             <div>
-              <h2 className="text-sm font-semibold">CLI authorized</h2>
-              <p className="mt-1 text-sm text-muted-foreground">You can close this tab and return to your terminal.</p>
+              <h2 className="text-sm font-semibold">{tr('cliAuth.doneTitle')}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{tr('cliAuth.doneDesc')}</p>
             </div>
           </CardContent>
         </Card>
@@ -195,12 +197,12 @@ function CliAuthorizeContent() {
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search projects"
+                placeholder={tr('cliAuth.searchPlaceholder')}
                 className="h-9 bg-background"
               />
               <Link href="/projects" className="shrink-0">
                 <Button variant="outline" size="sm" type="button">
-                  Manage projects
+                  {tr('cliAuth.manageProjects')}
                 </Button>
               </Link>
             </div>
@@ -214,10 +216,10 @@ function CliAuthorizeContent() {
 
           <section className="grid gap-3">
             {loading ? (
-              <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Loading projects...</div>
+              <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">{tr('cliAuth.loadingProjects')}</div>
             ) : filtered.length === 0 ? (
               <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">
-                No accessible projects found.
+                {tr('cliAuth.noProjects')}
               </div>
             ) : (
               filtered.map((project) => (
@@ -249,11 +251,11 @@ function CliAuthorizeContent() {
             <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-2 text-xs text-muted-foreground">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>The CLI stores this project key locally and uses it for future MCP requests.</span>
+                <span>{tr('cliAuth.securityNote')}</span>
               </div>
               <Button onClick={authorize} disabled={!selected || status === 'posting'} className="shrink-0">
                 {status === 'posting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                Authorize CLI
+                {tr('cliAuth.authorize')}
               </Button>
             </div>
           </section>

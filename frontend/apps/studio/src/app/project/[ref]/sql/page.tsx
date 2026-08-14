@@ -18,15 +18,21 @@ import { apiFetch, type ApiError } from '@/lib/api';
 import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
   ssr: false,
-  loading: () => (
-    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-      Loading editor…
-    </div>
-  ),
+  loading: () => <EditorLoading />,
 });
+
+function EditorLoading() {
+  const { tr } = useI18n();
+  return (
+    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+      {tr('sql.loadingEditor')}
+    </div>
+  );
+}
 
 interface SqlStatementResult {
   index: number;
@@ -72,11 +78,12 @@ export default function SqlEditorPage({ params }: { params: { ref: string } }) {
 }
 
 function SqlEditorInner() {
+  const { tr } = useI18n();
   const { project, platformKey } = useSession();
   const apikey = project!.apikey;
   const projectRef = project!.ref;
 
-  const [sql, setSql] = useState('-- Write SQL and press Run\nselect now();');
+  const [sql, setSql] = useState(`${tr('sql.initialPlaceholder')}\nselect now();`);
   const [running, setRunning] = useState(false);
   const [response, setResponse] = useState<SqlExecutionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +148,7 @@ function SqlEditorInner() {
       // Refresh history afterward — each execution lands in sql_execution_records.
       loadHistory();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Query failed.');
+      setError((err as ApiError).message ?? tr('sql.queryFailed'));
       setResponse(null);
     } finally {
       setRunning(false);
@@ -150,7 +157,7 @@ function SqlEditorInner() {
 
   async function deleteSnippet(id: number) {
     if (!platformKey) return;
-    if (!confirm('Delete this snippet?')) return;
+    if (!confirm(tr('sql.deleteConfirm'))) return;
     try {
       await apiFetch(
         `/auth/v1/admin/projects/${encodeURIComponent(projectRef)}/snippets/${id}`,
@@ -159,7 +166,7 @@ function SqlEditorInner() {
       if (activeSnippetId === id) setActiveSnippetId(null);
       await loadSnippets();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? tr('sql.deleteFailed'));
     }
   }
 
@@ -176,7 +183,7 @@ function SqlEditorInner() {
               tab === 'snippets' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <FileCode className="mr-1 inline h-3.5 w-3.5" /> Snippets
+            <FileCode className="mr-1 inline h-3.5 w-3.5" /> {tr('sql.tabSnippets')}
           </button>
           <button
             onClick={() => setTab('history')}
@@ -185,15 +192,15 @@ function SqlEditorInner() {
               tab === 'history' ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <History className="mr-1 inline h-3.5 w-3.5" /> History
+            <History className="mr-1 inline h-3.5 w-3.5" /> {tr('sql.tabHistory')}
           </button>
         </div>
         <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[10px] text-muted-foreground">
-          <span>{tab === 'snippets' ? `${snippets.length} saved` : `${history.length} recent`}</span>
+          <span>{tab === 'snippets' ? tr('sql.savedCount', { n: snippets.length }) : tr('sql.recentCount', { n: history.length })}</span>
           <button
             onClick={() => (tab === 'snippets' ? loadSnippets() : loadHistory())}
             className="rounded p-0.5 hover:bg-accent"
-            aria-label="Refresh"
+            aria-label={tr('sql.refreshAria')}
           >
             <RefreshCw className="h-3 w-3" />
           </button>
@@ -202,7 +209,7 @@ function SqlEditorInner() {
           {tab === 'snippets' ? (
             snippets.length === 0 ? (
               <p className="p-3 text-xs text-muted-foreground">
-                No saved snippets. Hit <strong>Save</strong> above to keep a query.
+                {tr('sql.noSnippetsPrefix')} <strong>{tr('sql.save')}</strong> {tr('sql.noSnippetsSuffix')}
               </p>
             ) : (
               <ul>
@@ -229,7 +236,7 @@ function SqlEditorInner() {
                     <button
                       onClick={() => deleteSnippet(s.id)}
                       className="rounded p-1 text-muted-foreground opacity-0 hover:bg-destructive/15 hover:text-destructive group-hover:opacity-100"
-                      aria-label="Delete snippet"
+                      aria-label={tr('sql.deleteSnippetAria')}
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -239,7 +246,7 @@ function SqlEditorInner() {
             )
           ) : history.length === 0 ? (
             <p className="p-3 text-xs text-muted-foreground">
-              No history yet. Run a query to start logging.
+              {tr('sql.noHistory')}
             </p>
           ) : (
             <ul>
@@ -274,22 +281,22 @@ function SqlEditorInner() {
       <section className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-border px-4 py-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">SQL Editor</h2>
+            <h2 className="text-sm font-semibold">{tr('sql.title')}</h2>
             {response ? (
               <Badge variant="outline">
-                {(lastQuery?.rows?.length ?? response.rows_affected ?? 0) +
-                  ' rows · ' +
-                  (response.execution_time_ms ?? 0) +
-                  ' ms'}
+                {tr('sql.resultBadge', {
+                  rows: lastQuery?.rows?.length ?? response.rows_affected ?? 0,
+                  ms: response.execution_time_ms ?? 0,
+                })}
               </Badge>
             ) : null}
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setSavingOpen(true)}>
-              <Save className="h-3.5 w-3.5" /> Save
+              <Save className="h-3.5 w-3.5" /> {tr('sql.save')}
             </Button>
             <Button size="sm" onClick={run} disabled={running}>
-              <Play className="h-3.5 w-3.5" /> {running ? 'Running…' : 'Run'}
+              <Play className="h-3.5 w-3.5" /> {running ? tr('sql.running') : tr('sql.run')}
             </Button>
           </div>
         </header>
@@ -321,7 +328,7 @@ function SqlEditorInner() {
                 {error}
               </pre>
             ) : !response ? (
-              <p className="p-4 text-sm text-muted-foreground">Run a query to see results here.</p>
+              <p className="p-4 text-sm text-muted-foreground">{tr('sql.runHint')}</p>
             ) : lastQuery && lastQuery.rows && lastQuery.rows.length > 0 ? (
               <table className="w-full border-collapse text-sm">
                 <thead className="sticky top-0 bg-card">
@@ -348,11 +355,11 @@ function SqlEditorInner() {
             ) : (
               <div className="space-y-2 p-4 text-sm">
                 <p className="text-emerald-400">
-                  ✓ Statement executed in {response.execution_time_ms ?? 0} ms
+                  {tr('sql.executed', { ms: response.execution_time_ms ?? 0 })}
                 </p>
                 {response.results?.map((r) => (
                   <p key={r.index} className="text-muted-foreground">
-                    #{r.index} {r.type} — {r.rows_affected ?? r.rows?.length ?? 0} rows
+                    {tr('sql.statementResult', { index: r.index, type: r.type, rows: r.rows_affected ?? r.rows?.length ?? 0 })}
                   </p>
                 ))}
               </div>
@@ -388,6 +395,7 @@ function SaveSnippetDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { tr } = useI18n();
   const { platformKey } = useSession();
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -413,7 +421,7 @@ function SaveSnippetDialog({
       });
       onSaved();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Save failed.');
+      setError((err as ApiError).message ?? tr('sql.saveFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -421,17 +429,17 @@ function SaveSnippetDialog({
 
   return (
     <Dialog open={open} onClose={onClose}>
-      <DialogHeader title="Save snippet" description="Visible only to you." onClose={onClose} />
+      <DialogHeader title={tr('sql.dialogTitle')} description={tr('sql.dialogDesc')} onClose={onClose} />
       <form onSubmit={submit}>
         <DialogBody className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="snippet-name">Name</Label>
+            <Label htmlFor="snippet-name">{tr('sql.fieldName')}</Label>
             <Input
               id="snippet-name"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Top 10 active users"
+              placeholder={tr('sql.snippetPlaceholder')}
               autoFocus
             />
           </div>
@@ -439,10 +447,10 @@ function SaveSnippetDialog({
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('sql.cancel')}
           </Button>
           <Button type="submit" disabled={submitting || !name.trim()}>
-            {submitting ? 'Saving…' : 'Save'}
+            {submitting ? tr('sql.saving') : tr('sql.save')}
           </Button>
         </DialogFooter>
       </form>

@@ -19,7 +19,7 @@ const staticExport = process.env.STUDIO_STATIC_EXPORT === 'true';
 // backend address (constant inside the container), so it's safe to fix at build time; set
 // NUBASE_INTERNAL_API_URL only for split deployments where the backend lives elsewhere.
 const internalApiUrl = process.env.NUBASE_INTERNAL_API_URL || 'http://127.0.0.1:9999';
-const apiProxyPrefixes = ['/auth/v1', '/rest/v1', '/storage/v1', '/functions', '/assets', '/cron', '/mem', '/ai-gateway', '/v1'];
+const apiProxyPrefixes = ['/auth/v1', '/rest/v1', '/storage/v1', '/functions', '/assets', '/cron', '/mem', '/ai-gateway', '/agent/v1', '/v1'];
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

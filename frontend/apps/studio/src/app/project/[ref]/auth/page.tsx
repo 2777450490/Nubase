@@ -28,6 +28,7 @@ import { useSession, isProjectReady } from '@/lib/session';
 import { NotProvisioned } from '@/components/not-provisioned';
 import { AuthSubNav } from './_components/sub-nav';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface AuthUser {
   id: string;
@@ -63,6 +64,7 @@ export default function AuthUsersPage({ params }: { params: { ref: string } }) {
 
 function AuthUsersInner() {
   const { project } = useSession();
+  const { tr } = useI18n();
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -87,7 +89,7 @@ function AuthUsersInner() {
       setUsers(res.users ?? []);
       setTotal(res.total ?? 0);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load users.');
+      setError((err as ApiError).message ?? tr('authUsers.empty'));
     } finally {
       setLoading(false);
     }
@@ -104,8 +106,8 @@ function AuthUsersInner() {
       <AuthSubNav projectRef={project!.ref} active="users" />
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold">Users</h2>
-          <Badge variant="outline">{total} total</Badge>
+          <h2 className="text-sm font-semibold">{tr('authUsers.title')}</h2>
+          <Badge variant="outline">{tr('authUsers.total', { n: total })}</Badge>
         </div>
         <div className="flex items-center gap-2">
           <form
@@ -118,17 +120,17 @@ function AuthUsersInner() {
           >
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search email, phone, role…"
+              placeholder={tr('authUsers.search')}
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               className="h-8 w-72 pl-7 text-xs"
             />
           </form>
           <Button size="sm" variant="outline" onClick={load}>
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+            <RefreshCw className="h-3.5 w-3.5" /> {tr('authUsers.refresh')}
           </Button>
           <Button size="sm" onClick={() => setInvitingOpen(true)}>
-            <UserPlus className="h-3.5 w-3.5" /> Invite
+            <UserPlus className="h-3.5 w-3.5" /> {tr('authUsers.invite')}
           </Button>
         </div>
       </header>
@@ -139,18 +141,18 @@ function AuthUsersInner() {
             <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
           </Card>
         ) : loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading users…</p>
+          <p className="p-4 text-sm text-muted-foreground">{tr('authUsers.loading')}</p>
         ) : users.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No users.</p>
+          <p className="p-4 text-sm text-muted-foreground">{tr('authUsers.empty')}</p>
         ) : (
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 bg-card">
               <tr className="border-b border-border">
-                <th className="px-3 py-2 text-left font-medium">User</th>
-                <th className="px-3 py-2 text-left font-medium">Role</th>
-                <th className="px-3 py-2 text-left font-medium">Last sign in</th>
-                <th className="px-3 py-2 text-left font-medium">Created</th>
-                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">{tr('authUsers.colUser')}</th>
+                <th className="px-3 py-2 text-left font-medium">{tr('authUsers.colRole')}</th>
+                <th className="px-3 py-2 text-left font-medium">{tr('authUsers.colLastSignIn')}</th>
+                <th className="px-3 py-2 text-left font-medium">{tr('authUsers.colCreated')}</th>
+                <th className="px-3 py-2 text-left font-medium">{tr('authUsers.colStatus')}</th>
               </tr>
             </thead>
             <tbody>
@@ -161,7 +163,7 @@ function AuthUsersInner() {
                   className="cursor-pointer border-b border-border/50 hover:bg-accent/30"
                 >
                   <td className="px-3 py-2">
-                    <div className="font-medium">{u.email ?? u.phone ?? '(no identifier)'}</div>
+                    <div className="font-medium">{u.email ?? u.phone ?? tr('authUsers.noIdentifier')}</div>
                     <div className="font-mono text-[10px] text-muted-foreground">{u.id}</div>
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{u.role ?? '—'}</td>
@@ -169,11 +171,11 @@ function AuthUsersInner() {
                   <td className="px-3 py-2 text-xs text-muted-foreground">{formatDate(u.created_at)}</td>
                   <td className="px-3 py-2">
                     {u.banned_until ? (
-                      <Badge variant="warning">banned</Badge>
+                      <Badge variant="warning">{tr('authUsers.banned')}</Badge>
                     ) : u.email_confirmed_at ? (
-                      <Badge variant="success">confirmed</Badge>
+                      <Badge variant="success">{tr('authUsers.confirmed')}</Badge>
                     ) : (
-                      <Badge variant="outline">pending</Badge>
+                      <Badge variant="outline">{tr('authUsers.pending')}</Badge>
                     )}
                   </td>
                 </tr>
@@ -185,11 +187,11 @@ function AuthUsersInner() {
 
       <footer className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-muted-foreground">
         <span>
-          Page {page} of {pageCount}
+          {tr('authUsers.page', { page, count: pageCount })}
         </span>
         <div className="flex gap-1">
           <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-            <ChevronLeft className="h-3.5 w-3.5" /> Prev
+            <ChevronLeft className="h-3.5 w-3.5" /> {tr('authUsers.prev')}
           </Button>
           <Button
             size="sm"
@@ -197,7 +199,7 @@ function AuthUsersInner() {
             onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
             disabled={page >= pageCount}
           >
-            Next <ChevronRight className="h-3.5 w-3.5" />
+            {tr('authUsers.next')} <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       </footer>
@@ -233,6 +235,7 @@ interface InviteDialogProps {
 }
 
 function InviteDialog({ open, apikey, onClose, onInvited }: InviteDialogProps) {
+  const { tr } = useI18n();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,7 +259,7 @@ function InviteDialog({ open, apikey, onClose, onInvited }: InviteDialogProps) {
       });
       onInvited();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Invite failed.');
+      setError((err as ApiError).message ?? tr('authUsers.inviteSend'));
     } finally {
       setSubmitting(false);
     }
@@ -265,14 +268,14 @@ function InviteDialog({ open, apikey, onClose, onInvited }: InviteDialogProps) {
   return (
     <Dialog open={open} onClose={onClose}>
       <DialogHeader
-        title="Invite user"
-        description="An invitation email will be sent with a confirmation link."
+        title={tr('authUsers.inviteTitle')}
+        description={tr('authUsers.inviteDesc')}
         onClose={onClose}
       />
       <form onSubmit={submit}>
         <DialogBody className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="invite-email">Email</Label>
+            <Label htmlFor="invite-email">{tr('authUsers.inviteEmail')}</Label>
             <Input
               id="invite-email"
               type="email"
@@ -287,10 +290,10 @@ function InviteDialog({ open, apikey, onClose, onInvited }: InviteDialogProps) {
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-            Cancel
+            {tr('authUsers.inviteCancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Sending…' : 'Send invite'}
+            {submitting ? tr('authUsers.inviteSending') : tr('authUsers.inviteSend')}
           </Button>
         </DialogFooter>
       </form>
@@ -306,6 +309,7 @@ interface UserDetailsDialogProps {
 }
 
 function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDialogProps) {
+  const { tr } = useI18n();
   const [working, setWorking] = useState<null | 'ban' | 'unban' | 'delete'>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -332,7 +336,7 @@ function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDial
       });
       onChanged();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Action failed.');
+      setError((err as ApiError).message ?? tr('authUsers.detailDelete'));
     } finally {
       setWorking(null);
     }
@@ -348,7 +352,7 @@ function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDial
       });
       onChanged();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Delete failed.');
+      setError((err as ApiError).message ?? tr('authUsers.detailDelete'));
     } finally {
       setWorking(null);
     }
@@ -357,20 +361,20 @@ function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDial
   return (
     <Dialog open={Boolean(user)} onClose={onClose} size="max-w-lg">
       <DialogHeader
-        title={user.email ?? user.phone ?? 'User'}
+        title={user.email ?? user.phone ?? tr('authUsers.colUser')}
         description={user.id}
         onClose={onClose}
       />
       <DialogBody className="space-y-3 text-sm">
-        <Row label="Role" value={user.role ?? '—'} />
-        <Row label="Phone" value={user.phone ?? '—'} />
-        <Row label="Email confirmed" value={formatDate(user.email_confirmed_at)} />
-        <Row label="Last sign-in" value={formatDate(user.last_sign_in_at)} />
-        <Row label="Created" value={formatDate(user.created_at)} />
-        <Row label="Banned until" value={user.banned_until ? formatDate(user.banned_until) : '—'} />
+        <Row label={tr('authUsers.detailRole')} value={user.role ?? '—'} />
+        <Row label={tr('authUsers.detailPhone')} value={user.phone ?? '—'} />
+        <Row label={tr('authUsers.detailEmailConfirmed')} value={formatDate(user.email_confirmed_at)} />
+        <Row label={tr('authUsers.detailLastSignIn')} value={formatDate(user.last_sign_in_at)} />
+        <Row label={tr('authUsers.detailCreated')} value={formatDate(user.created_at)} />
+        <Row label={tr('authUsers.detailBannedUntil')} value={user.banned_until ? formatDate(user.banned_until) : '—'} />
         {user.user_metadata && Object.keys(user.user_metadata).length > 0 ? (
           <div>
-            <p className="mb-1 text-xs text-muted-foreground">user_metadata</p>
+            <p className="mb-1 text-xs text-muted-foreground">{tr('authUsers.detailUserMeta')}</p>
             <pre className="max-h-48 overflow-auto rounded-md border border-border bg-muted p-2 text-[11px]">
               {JSON.stringify(user.user_metadata, null, 2)}
             </pre>
@@ -381,12 +385,12 @@ function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDial
       <DialogFooter>
         {confirmDelete ? (
           <>
-            <span className="mr-auto text-xs text-destructive">Delete this user permanently?</span>
+            <span className="mr-auto text-xs text-destructive">{tr('authUsers.detailDeleteConfirm')}</span>
             <Button variant="outline" size="sm" onClick={() => setConfirmDelete(false)} disabled={working !== null}>
-              Cancel
+              {tr('authUsers.inviteCancel')}
             </Button>
             <Button variant="destructive" size="sm" onClick={doDelete} disabled={working !== null}>
-              {working === 'delete' ? 'Deleting…' : 'Yes, delete'}
+              {working === 'delete' ? tr('authUsers.detailDeleting') : tr('authUsers.detailYesDelete')}
             </Button>
           </>
         ) : (
@@ -398,23 +402,23 @@ function UserDetailsDialog({ user, apikey, onClose, onChanged }: UserDetailsDial
               disabled={working !== null}
               className="mr-auto"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Delete
+              <Trash2 className="h-3.5 w-3.5" /> {tr('authUsers.detailDelete')}
             </Button>
             <Button variant="outline" size="sm" onClick={toggleBan} disabled={working !== null}>
               {banned ? (
                 <>
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  {working === 'unban' ? 'Unbanning…' : 'Unban'}
+                  {working === 'unban' ? tr('authUsers.detailUnban') : tr('authUsers.detailUnban')}
                 </>
               ) : (
                 <>
                   <Ban className="h-3.5 w-3.5" />
-                  {working === 'ban' ? 'Banning…' : 'Ban'}
+                  {working === 'ban' ? tr('authUsers.detailBan') : tr('authUsers.detailBan')}
                 </>
               )}
             </Button>
             <Button size="sm" onClick={onClose}>
-              Close
+              {tr('authUsers.detailClose')}
             </Button>
           </>
         )}

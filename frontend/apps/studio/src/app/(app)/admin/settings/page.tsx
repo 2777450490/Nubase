@@ -6,6 +6,7 @@ import { Mail, HardDrive, Save, RefreshCw } from 'lucide-react';
 import { Button, Card, CardContent } from '@nubase/ui';
 import { apiFetch, type ApiError } from '@/lib/api';
 import { useSession, isSuperAdmin } from '@/lib/session';
+import { useI18n } from '@/lib/i18n';
 
 /**
  * Platform-wide runtime settings. Super-admin only.
@@ -64,6 +65,7 @@ const EMPTY_R2: R2Form = {
 };
 
 export default function PlatformSettingsPage() {
+  const { tr } = useI18n();
   const router = useRouter();
   const { platformKey, user, hasHydrated } = useSession();
   const superAdmin = isSuperAdmin(user);
@@ -117,7 +119,7 @@ export default function PlatformSettingsPage() {
       setR2AccessKeySet(isSet(rv.access_key_id));
       setR2SecretSet(isSet(rv.secret_access_key));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load settings.');
+      setError((err as ApiError).message ?? tr('adminSettings.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -156,11 +158,11 @@ export default function PlatformSettingsPage() {
         body,
         apikey: platformKey,
       });
-      setSavedMessage('SMTP settings saved.');
+      setSavedMessage(tr('adminSettings.smtpSaved'));
       setSmtp((cur) => ({ ...cur, password: '' }));
       setSmtpPasswordSet(isSet((res.values ?? {}).password));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Save failed.');
+      setError((err as ApiError).message ?? tr('adminSettings.saveFailed'));
     } finally {
       setSavingSection(null);
     }
@@ -184,12 +186,12 @@ export default function PlatformSettingsPage() {
         '/auth/v1/admin/platform/settings/storage_r2',
         { method: 'PUT', body, apikey: platformKey },
       );
-      setSavedMessage('R2 storage settings saved.');
+      setSavedMessage(tr('adminSettings.r2Saved'));
       setR2((cur) => ({ ...cur, access_key_id: '', secret_access_key: '' }));
       setR2AccessKeySet(isSet((res.values ?? {}).access_key_id));
       setR2SecretSet(isSet((res.values ?? {}).secret_access_key));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Save failed.');
+      setError((err as ApiError).message ?? tr('adminSettings.saveFailed'));
     } finally {
       setSavingSection(null);
     }
@@ -201,13 +203,13 @@ export default function PlatformSettingsPage() {
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Platform settings</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{tr('adminSettings.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            Runtime configuration. Changes take effect without a restart. Super admins only.
+            {tr('adminSettings.desc')}
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          <RefreshCw className="h-3.5 w-3.5" /> {tr('adminSettings.refresh')}
         </Button>
       </header>
 
@@ -218,10 +220,10 @@ export default function PlatformSettingsPage() {
         <CardContent className="space-y-4 p-6">
           <div className="flex items-center gap-2 border-b border-border pb-3">
             <Mail className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Email (SMTP)</h2>
+            <h2 className="text-lg font-semibold">{tr('adminSettings.smtpTitle')}</h2>
           </div>
 
-          <Field label="Host">
+          <Field label={tr('adminSettings.fieldHost')}>
             <input
               className={inputClass}
               placeholder="smtp.example.com"
@@ -232,7 +234,7 @@ export default function PlatformSettingsPage() {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Port">
+            <Field label={tr('adminSettings.fieldPort')}>
               <input
                 className={inputClass}
                 placeholder="587"
@@ -242,20 +244,20 @@ export default function PlatformSettingsPage() {
                 inputMode="numeric"
               />
             </Field>
-            <Field label="STARTTLS">
+            <Field label={tr('adminSettings.fieldStarttls')}>
               <select
                 className={inputClass}
                 value={smtp.starttls_enabled}
                 onChange={(e) => setSmtp({ ...smtp, starttls_enabled: e.target.value })}
                 disabled={loading}
               >
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
+                <option value="true">{tr('adminSettings.starttlsEnabled')}</option>
+                <option value="false">{tr('adminSettings.starttlsDisabled')}</option>
               </select>
             </Field>
           </div>
 
-          <Field label="Username">
+          <Field label={tr('adminSettings.fieldUsername')}>
             <input
               className={inputClass}
               placeholder="postmaster@example.com"
@@ -266,12 +268,8 @@ export default function PlatformSettingsPage() {
           </Field>
 
           <Field
-            label="Password"
-            hint={
-              smtpPasswordSet
-                ? 'A password is currently set. Leave blank to keep, type to rotate.'
-                : 'No password set.'
-            }
+            label={tr('adminSettings.fieldPassword')}
+            hint={smtpPasswordSet ? tr('adminSettings.passwordSetHint') : tr('adminSettings.passwordNotSet')}
           >
             <input
               className={inputClass}
@@ -285,7 +283,7 @@ export default function PlatformSettingsPage() {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="From address">
+            <Field label={tr('adminSettings.fieldFromAddress')}>
               <input
                 className={inputClass}
                 placeholder="noreply@example.com"
@@ -294,7 +292,7 @@ export default function PlatformSettingsPage() {
                 disabled={loading}
               />
             </Field>
-            <Field label="From name">
+            <Field label={tr('adminSettings.fieldFromName')}>
               <input
                 className={inputClass}
                 placeholder="Nubase"
@@ -312,7 +310,7 @@ export default function PlatformSettingsPage() {
               variant="brand"
             >
               <Save className="h-3.5 w-3.5" />{' '}
-              {savingSection === 'smtp' ? 'Saving…' : 'Save SMTP'}
+              {savingSection === 'smtp' ? tr('adminSettings.saving') : tr('adminSettings.saveSmtp')}
             </Button>
           </div>
         </CardContent>
@@ -322,15 +320,17 @@ export default function PlatformSettingsPage() {
         <CardContent className="space-y-4 p-6">
           <div className="flex items-center gap-2 border-b border-border pb-3">
             <HardDrive className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Storage (Cloudflare R2 / S3)</h2>
+            <h2 className="text-lg font-semibold">{tr('adminSettings.r2Title')}</h2>
           </div>
           <p className="text-xs text-muted-foreground">
-            S3-compatible object storage backing the Storage API. For Cloudflare R2 use{' '}
-            <code>https://&lt;account&gt;.r2.cloudflarestorage.com</code> and region{' '}
-            <code>auto</code>.
+            {tr('adminSettings.r2DescPrefix')}{' '}
+            <code>https://&lt;account&gt;.r2.cloudflarestorage.com</code>{' '}
+            {tr('adminSettings.r2DescMid')}{' '}
+            <code>auto</code>
+            {tr('adminSettings.r2DescSuffix')}
           </p>
 
-          <Field label="Endpoint">
+          <Field label={tr('adminSettings.fieldEndpoint')}>
             <input
               className={inputClass}
               placeholder="https://<account>.r2.cloudflarestorage.com"
@@ -341,7 +341,7 @@ export default function PlatformSettingsPage() {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Region">
+            <Field label={tr('adminSettings.fieldRegion')}>
               <input
                 className={inputClass}
                 placeholder="auto"
@@ -350,7 +350,7 @@ export default function PlatformSettingsPage() {
                 disabled={loading}
               />
             </Field>
-            <Field label="Global bucket">
+            <Field label={tr('adminSettings.fieldGlobalBucket')}>
               <input
                 className={inputClass}
                 placeholder="nubase-storage"
@@ -362,12 +362,8 @@ export default function PlatformSettingsPage() {
           </div>
 
           <Field
-            label="Access key ID"
-            hint={
-              r2AccessKeySet
-                ? 'An access key is currently set. Leave blank to keep.'
-                : 'No access key set.'
-            }
+            label={tr('adminSettings.fieldAccessKey')}
+            hint={r2AccessKeySet ? tr('adminSettings.accessKeySetHint') : tr('adminSettings.accessKeyNotSet')}
           >
             <input
               className={inputClass}
@@ -381,12 +377,8 @@ export default function PlatformSettingsPage() {
           </Field>
 
           <Field
-            label="Secret access key"
-            hint={
-              r2SecretSet
-                ? 'A secret is currently set. Leave blank to keep, type to rotate.'
-                : 'No secret set.'
-            }
+            label={tr('adminSettings.fieldSecretKey')}
+            hint={r2SecretSet ? tr('adminSettings.secretSetHint') : tr('adminSettings.secretNotSet')}
           >
             <input
               className={inputClass}
@@ -399,7 +391,7 @@ export default function PlatformSettingsPage() {
             />
           </Field>
 
-          <Field label="Public URL (optional)">
+          <Field label={tr('adminSettings.fieldPublicUrl')}>
             <input
               className={inputClass}
               placeholder="https://files.example.com"
@@ -416,15 +408,16 @@ export default function PlatformSettingsPage() {
               variant="brand"
             >
               <Save className="h-3.5 w-3.5" />{' '}
-              {savingSection === 'r2' ? 'Saving…' : 'Save R2 storage'}
+              {savingSection === 'r2' ? tr('adminSettings.saving') : tr('adminSettings.saveR2')}
             </Button>
           </div>
         </CardContent>
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        More sections (S3 Vectors, OAuth providers, LLM keys) will appear here as they are
-        wired through <code>PlatformSettingsService</code>.
+        {tr('adminSettings.morePrefix')}{' '}
+        <code>PlatformSettingsService</code>
+        {tr('adminSettings.moreSuffix')}
       </p>
     </div>
   );

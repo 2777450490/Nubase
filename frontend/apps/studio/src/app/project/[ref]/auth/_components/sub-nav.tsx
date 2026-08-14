@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Users, KeyRound, Building2, Mail, Settings as SettingsIcon } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 type AuthTab = 'users' | 'providers' | 'sso' | 'templates' | 'settings';
 
@@ -16,17 +17,18 @@ export function AuthSubNav({
   projectRef: string;
   active: AuthTab;
 }) {
+  const { tr } = useI18n();
   const items: Array<{
     key: AuthTab;
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
   }> = [
-    { key: 'users', label: 'Users', href: `/project/${projectRef}/auth`, icon: Users },
-    { key: 'providers', label: 'Providers', href: `/project/${projectRef}/auth/providers`, icon: KeyRound },
-    { key: 'sso', label: 'SSO', href: `/project/${projectRef}/auth/sso`, icon: Building2 },
-    { key: 'templates', label: 'Email Templates', href: `/project/${projectRef}/auth/templates`, icon: Mail },
-    { key: 'settings', label: 'Settings', href: `/project/${projectRef}/auth/settings`, icon: SettingsIcon },
+    { key: 'users', label: tr('authSubnav.users'), href: `/project/${projectRef}/auth`, icon: Users },
+    { key: 'providers', label: tr('authSubnav.providers'), href: `/project/${projectRef}/auth/providers`, icon: KeyRound },
+    { key: 'sso', label: tr('authSubnav.sso'), href: `/project/${projectRef}/auth/sso`, icon: Building2 },
+    { key: 'templates', label: tr('authSubnav.templates'), href: `/project/${projectRef}/auth/templates`, icon: Mail },
+    { key: 'settings', label: tr('authSubnav.settings'), href: `/project/${projectRef}/auth/settings`, icon: SettingsIcon },
   ];
   return (
     <nav className="border-b border-border bg-muted/10 px-4">

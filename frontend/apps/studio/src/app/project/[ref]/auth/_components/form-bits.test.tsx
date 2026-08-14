@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Database } from 'lucide-react';
 import { BoolInput, NumberInput, TextInput, SelectInput, Row, SectionCard } from './form-bits';
+import { I18nProvider } from '../../../../../lib/i18n';
 
 // @nubase/ui Card/CardContent are only structural here — stub them to keep the test isolated.
 vi.mock('@nubase/ui', () => ({
@@ -12,7 +13,7 @@ vi.mock('@nubase/ui', () => ({
 describe('form-bits', () => {
   it('BoolInput reflects value and emits the toggled value', () => {
     const onChange = vi.fn();
-    render(<BoolInput value={false} onChange={onChange} />);
+    render(<I18nProvider><BoolInput value={false} onChange={onChange} /></I18nProvider>);
     const box = screen.getByRole('checkbox') as HTMLInputElement;
     expect(box.checked).toBe(false);
     fireEvent.click(box);

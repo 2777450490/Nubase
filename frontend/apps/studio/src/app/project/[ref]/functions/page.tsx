@@ -9,6 +9,7 @@ import { NotProvisioned } from '@/components/not-provisioned';
 import { InfoTile } from '@/components/info-tile';
 import { formatDate } from '@/lib/format';
 import { useProjectRef } from '@/lib/route-params';
+import { useI18n } from '@/lib/i18n';
 
 interface EdgeFunction {
   id: string;
@@ -96,6 +97,7 @@ export default function FunctionsPage({ params }: { params: { ref: string } }) {
 
 function FunctionsInner({ projectRef }: { projectRef: string }) {
   const { project } = useSession();
+  const { tr } = useI18n();
   const apikey = project!.apikey;
   const [functions, setFunctions] = useState<EdgeFunction[]>([]);
   const [logs, setLogs] = useState<InvocationLog[]>([]);
@@ -125,7 +127,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       // sidebar selection does not refetch the whole list.
       setSelected((prev) => prev ?? fns[0]?.slug ?? null);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Failed to load functions.');
+      setError((err as ApiError).message ?? tr('functions.empty'));
     } finally {
       setLoading(false);
     }
@@ -193,7 +195,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       setSelected(fn.slug);
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Create failed.');
+      setError((err as ApiError).message ?? tr('functions.create'));
     } finally {
       setBusy(null);
     }
@@ -211,7 +213,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       });
       setFunctions((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
     } catch (err) {
-      setError((err as ApiError).message ?? 'Update failed.');
+      setError((err as ApiError).message ?? tr('functions.deploy'));
     } finally {
       setBusy(null);
     }
@@ -219,7 +221,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
 
   async function deploySource(fn: EdgeFunction) {
     if (!sourceCode.trim()) {
-      setError('Function source is required.');
+      setError(tr('functions.deploy'));
       return;
     }
     const bundlePath = resolveBundlePath(fn.entrypoint);
@@ -245,17 +247,17 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       // The deploy endpoint reports provider failures in-band: HTTP 200 with a
       // version DTO whose status is "failed".
       const localNote = version.provider === 'local'
-        ? 'Note: the local executor does not receive Studio-uploaded code — this deploy only records a version; the local runtime serves its own function directory.'
+        ? tr('functions.localNote')
         : null;
       if (version.status === 'failed') {
-        setError(version.errorMessage ?? 'Deploy failed.');
+        setError(version.errorMessage ?? tr('functions.deployFailed'));
         if (localNote) setSourceNote(localNote);
       } else {
-        setSourceNote(`Deployed ${bundlePath} (${sourceCode.length} chars).${localNote ? ` ${localNote}` : ''}`);
+        setSourceNote(`${tr('functions.deployed', { path: bundlePath, n: sourceCode.length })}${localNote ? ` ${localNote}` : ''}`);
       }
       await load();
     } catch (err) {
-      setError((err as ApiError).message ?? 'Deploy failed.');
+      setError((err as ApiError).message ?? tr('functions.deployFailed'));
     } finally {
       setBusy(null);
     }
@@ -265,7 +267,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
     if (!file) return;
     setError(null);
     if (!/\.(js|mjs)$/.test(file.name)) {
-      setError('Upload a JavaScript file such as index.js or index.mjs.');
+      setError(tr('functions.secrets'));
       return;
     }
     const text = await file.text();
@@ -298,7 +300,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       });
       await loadInvocations();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invoke failed.');
+      setError(err instanceof Error ? err.message : tr('functions.run'));
     } finally {
       setBusy(null);
     }
@@ -323,7 +325,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
       setSecretDraft('');
       await loadSecrets(current.slug);
     } catch (err) {
-      setError((err as ApiError).message ?? 'Secret update failed.');
+      setError((err as ApiError).message ?? tr('functions.secrets'));
     } finally {
       setBusy(null);
     }
@@ -338,9 +340,9 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
               <CloudCog className="h-4 w-4 text-brand" />
             </div>
             <div>
-              <h1 className="text-base font-semibold">Functions</h1>
+              <h1 className="text-base font-semibold">{tr('functions.title')}</h1>
               <p className="text-xs text-muted-foreground">
-                Project functions for <span className="font-mono">{projectRef}</span>.
+                {tr('functions.subtitle', { ref: projectRef })}
               </p>
             </div>
           </div>
@@ -350,7 +352,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
             </code>
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               <RefreshCw className={'h-3.5 w-3.5 ' + (loading ? 'animate-spin' : '')} />
-              Refresh
+              {tr('functions.refresh')}
             </Button>
           </div>
         </div>
@@ -361,23 +363,23 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
           <form onSubmit={createFunction} className="space-y-3 rounded-lg border border-border bg-card p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Plus className="h-4 w-4" />
-              New function
+              {tr('functions.newFunction')}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="fn-name" className="text-xs">Name</Label>
+              <Label htmlFor="fn-name" className="text-xs">{tr('functions.name')}</Label>
               <Input id="fn-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="fn-slug" className="text-xs">Slug</Label>
-              <Input id="fn-slug" value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value })} placeholder="optional" />
+              <Label htmlFor="fn-slug" className="text-xs">{tr('functions.slug')}</Label>
+              <Input id="fn-slug" value={draft.slug} onChange={(e) => setDraft({ ...draft, slug: e.target.value })} placeholder={tr('functions.optional')} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="fn-desc" className="text-xs">Description</Label>
-              <Input id="fn-desc" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="optional" />
+              <Label htmlFor="fn-desc" className="text-xs">{tr('functions.description')}</Label>
+              <Input id="fn-desc" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={tr('functions.optional')} />
             </div>
             <Button size="sm" className="w-full" disabled={busy === 'create'}>
               <Plus className="h-3.5 w-3.5" />
-              Create
+              {tr('functions.create')}
             </Button>
           </form>
 
@@ -395,7 +397,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-semibold">{fn.name}</span>
-                  <Badge variant={fn.enabled ? 'success' : 'warning'}>{fn.enabled ? 'on' : 'off'}</Badge>
+                  <Badge variant={fn.enabled ? 'success' : 'warning'}>{fn.enabled ? tr('functions.enabled') : tr('functions.disabled')}</Badge>
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-mono">{fn.slug}</span>
@@ -405,7 +407,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
             ))}
             {!loading && functions.length === 0 ? (
               <p className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-                No functions yet. Create one here or deploy with <span className="font-mono">nubase_cli functions deploy</span>.
+                {tr('functions.empty')}
               </p>
             ) : null}
           </div>
@@ -423,20 +425,20 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => patchFunction(current, { enabled: !current.enabled })} disabled={busy === current.slug}>
                       <Play className="h-3.5 w-3.5" />
-                      {current.enabled ? 'Disable' : 'Enable'}
+                      {current.enabled ? tr('functions.disable') : tr('functions.enable')}
                     </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <ToggleTile
-                      label="JWT verification"
+                      label={tr('functions.jwtVerification')}
                       active={current.verifyJwt}
                       icon={current.verifyJwt ? ShieldCheck : ShieldOff}
                       onClick={() => patchFunction(current, { verifyJwt: !current.verifyJwt })}
                     />
                     <div className="rounded-lg border border-border bg-background p-3">
-                      <div className="text-xs text-muted-foreground">Entrypoint</div>
+                      <div className="text-xs text-muted-foreground">{tr('functions.entrypoint')}</div>
                       <div className="mt-2 font-mono text-sm">{current.entrypoint}</div>
                     </div>
                   </div>
@@ -446,17 +448,17 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
-                    <CardTitle className="text-base">Source</CardTitle>
-                    <p className="mt-1 text-xs text-muted-foreground">Deploys the editor as <span className="font-mono">{resolveBundlePath(current.entrypoint)}</span>.</p>
+                    <CardTitle className="text-base">{tr('functions.source')}</CardTitle>
+                    <p className="mt-1 text-xs text-muted-foreground">{tr('functions.sourceDesc', { path: resolveBundlePath(current.entrypoint) })}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" size="sm" variant="outline" onClick={() => { setSourceCode(SAMPLE_SOURCE); setSourceNote('Sample source loaded.'); }}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => { setSourceCode(SAMPLE_SOURCE); setSourceNote(tr('functions.sampleLoaded')); }}>
                       <FileCode className="h-3.5 w-3.5" />
-                      Sample
+                      {tr('functions.sample')}
                     </Button>
                     <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium hover:bg-accent">
                       <Upload className="h-3.5 w-3.5" />
-                      Upload
+                      {tr('functions.upload')}
                       <input
                         type="file"
                         accept=".js,.mjs,application/javascript,text/javascript,text/plain"
@@ -466,7 +468,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                     </label>
                     <Button size="sm" onClick={() => deploySource(current)} disabled={busy === `deploy:${current.slug}`}>
                       <Rocket className="h-3.5 w-3.5" />
-                      Deploy
+                      {tr('functions.deploy')}
                     </Button>
                   </div>
                 </CardHeader>
@@ -479,7 +481,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                   />
                   {sourceIsTemplate ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Showing the sample template — not the deployed source of <span className="font-mono">{current.slug}</span>.
+                      {tr('functions.sampleNotice', { slug: current.slug })}
                     </p>
                   ) : null}
                   {sourceNote ? <p className="mt-2 text-xs text-muted-foreground">{sourceNote}</p> : null}
@@ -489,19 +491,19 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
-                    <CardTitle className="text-base">Test Invoke</CardTitle>
+                    <CardTitle className="text-base">{tr('functions.testInvoke')}</CardTitle>
                     <p className="mt-1 font-mono text-xs text-muted-foreground">POST /functions/v1/{current.slug}</p>
                   </div>
                   <Button size="sm" onClick={invokeFunction} disabled={busy === `invoke:${current.slug}`}>
                     <Play className="h-3.5 w-3.5" />
-                    Run
+                    {tr('functions.run')}
                   </Button>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={invokeFunction} className="space-y-3">
                     <div className="grid grid-cols-[120px_1fr] gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="invoke-method" className="text-xs">Method</Label>
+                        <Label htmlFor="invoke-method" className="text-xs">{tr('functions.method')}</Label>
                         <select
                           id="invoke-method"
                           value={invokeDraft.method}
@@ -512,7 +514,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="invoke-path" className="text-xs">Path and query</Label>
+                        <Label htmlFor="invoke-path" className="text-xs">{tr('functions.pathAndQuery')}</Label>
                         <Input
                           id="invoke-path"
                           value={invokeDraft.path}
@@ -523,7 +525,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="invoke-body" className="text-xs">JSON body</Label>
+                      <Label htmlFor="invoke-body" className="text-xs">{tr('functions.jsonBody')}</Label>
                       <textarea
                         id="invoke-body"
                         value={invokeDraft.body}
@@ -536,7 +538,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                   {invokeResult ? (
                     <div className="mt-3 overflow-hidden rounded-md border border-border">
                       <div className="flex items-center justify-between border-b border-border bg-muted/60 px-3 py-2 text-xs">
-                        <span>Status</span>
+                        <span>{tr('functions.status')}</span>
                         <Badge variant={invokeResult.status < 400 ? 'success' : 'warning'}>{invokeResult.status}</Badge>
                       </div>
                       <pre className="max-h-72 overflow-auto bg-background p-3 text-xs">{formatResponseBody(invokeResult.body)}</pre>
@@ -547,25 +549,25 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Active Deployment</CardTitle>
+                  <CardTitle className="text-base">{tr('functions.activeDeployment')}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {current.activeVersion ? (
                     <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
-                      <InfoTile label="Version" value={`v${current.activeVersion.versionNo}`} />
-                      <InfoTile label="Provider" value={current.activeVersion.provider} />
-                      <InfoTile label="Status" value={current.activeVersion.status} />
-                      <InfoTile label="Source hash" value={current.activeVersion.sourceHash?.slice(0, 12) ?? '-'} mono />
+                      <InfoTile label={tr('functions.version')} value={`v${current.activeVersion.versionNo}`} />
+                      <InfoTile label={tr('functions.provider')} value={current.activeVersion.provider} />
+                      <InfoTile label={tr('functions.statusVal')} value={current.activeVersion.status} />
+                      <InfoTile label={tr('functions.sourceHash')} value={current.activeVersion.sourceHash?.slice(0, 12) ?? '-'} mono />
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No active deployment. Deploy from CLI or create a marker here.</p>
+                    <p className="text-sm text-muted-foreground">{tr('functions.noDeployment')}</p>
                   )}
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Secrets</CardTitle>
+                  <CardTitle className="text-base">{tr('functions.secrets')}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={setSecret} className="flex gap-2">
@@ -575,20 +577,20 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                       placeholder="API_KEY=value"
                       className="font-mono text-xs"
                     />
-                    <Button size="sm" disabled={busy === `secret:${current.slug}`}>Set</Button>
+                    <Button size="sm" disabled={busy === `secret:${current.slug}`}>{tr('functions.set')}</Button>
                   </form>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {secrets.map((secret) => (
                       <Badge key={secret.name} variant="outline" className="font-mono">{secret.name}</Badge>
                     ))}
-                    {secrets.length === 0 ? <span className="text-xs text-muted-foreground">No secrets configured.</span> : null}
+                    {secrets.length === 0 ? <span className="text-xs text-muted-foreground">{tr('functions.noSecrets')}</span> : null}
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0">
-                  <CardTitle className="text-base">Recent Invocations</CardTitle>
+                  <CardTitle className="text-base">{tr('functions.recentInvocations')}</CardTitle>
                   <Activity className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
@@ -596,12 +598,12 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
                     <table className="w-full text-left text-xs">
                       <thead className="bg-muted/60 text-muted-foreground">
                         <tr>
-                          <th className="px-3 py-2">Time</th>
-                          <th className="px-3 py-2">Method</th>
-                          <th className="px-3 py-2">Path</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Caller</th>
-                          <th className="px-3 py-2">Duration</th>
+                          <th className="px-3 py-2">{tr('cron.colStarted')}</th>
+                          <th className="px-3 py-2">{tr('functions.method')}</th>
+                          <th className="px-3 py-2">{tr('functions.path')}</th>
+                          <th className="px-3 py-2">{tr('functions.status')}</th>
+                          <th className="px-3 py-2">{tr('functions.caller')}</th>
+                          <th className="px-3 py-2">{tr('cron.colDuration')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -623,7 +625,7 @@ function FunctionsInner({ projectRef }: { projectRef: string }) {
             </div>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select or create a function.
+              {tr('functions.selectOrCreate')}
             </div>
           )}
         </section>
